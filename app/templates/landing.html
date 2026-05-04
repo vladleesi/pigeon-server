@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Pigeon invite{% endblock %}
+{% block content %}
+<section class="card center">
+  <h1>Pigeon invite</h1>
+  {% if status == "active" %}
+    {% if details.is_personal %}
+    <p>This is a <b>personal</b> link for a private 1:1 chat.</p>
+    {% else %}
+    <p>This is a <b>group</b> invite link.</p>
+    {% endif %}
+    <p>Open it inside the Pigeon mobile app to activate.</p>
+    <p class="muted small">Activation intentionally happens in-app — browser-only access is not supported.</p>
+    <div class="token-box">
+      <code>{{ token }}</code>
+    </div>
+  {% elif status == "expired" %}
+    <p>This link expired. Ask your administrator for a fresh invite.</p>
+  {% elif status == "used" %}
+    <p>This link was fully consumed. Ask your administrator for a fresh invite.</p>
+  {% elif status == "revoked" %}
+    <p>This link was revoked by an administrator.</p>
+  {% else %}
+    <p>This invite token does not exist.</p>
+  {% endif %}
+</section>
+{% endblock %}

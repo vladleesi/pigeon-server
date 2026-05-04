@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pigeon{% endblock %}</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin/">Pigeon</a>
+    {% if admin %}
+    <nav>
+      <a href="/admin/">Overview</a>
+      <a href="/admin/users">Users</a>
+      <a href="/admin/links">Links</a>
+      <a href="/admin/chats">Chats</a>
+      <a href="/admin/export-ui">Export</a>
+    </nav>
+    <form method="post" action="/admin/logout" class="logout">
+      <span class="hello">{{ admin.username }}</span>
+      <button type="submit">Sign out</button>
+    </form>
+    {% endif %}
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <span>Pigeon Server &middot; payloads are encrypted on the client</span>
+  </footer>
+</body>
+</html>

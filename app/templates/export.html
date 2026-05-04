@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Export · Pigeon{% endblock %}
+{% block content %}
+<h1>Export and import</h1>
+
+<section class="card">
+  <h2>Download bundle</h2>
+  <p class="muted">
+    Bundles include users, chats, memberships, and active invite tokens.
+    Message ciphertext history never ships — the server does not retain it after ACK/TTL.
+  </p>
+  <a class="button primary" href="/admin/api/export">Download JSON</a>
+</section>
+
+<section class="card">
+  <h2>Upload bundle</h2>
+  <form method="post" action="/admin/api/import" enctype="multipart/form-data">
+    <label>
+      <span>File</span>
+      <input type="file" name="bundle" accept="application/json" required>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="replace" value="true">
+      <span>Full replace (erase existing users/chats/links first)</span>
+    </label>
+    <button type="submit" class="primary">Import</button>
+  </form>
+</section>
+{% endblock %}

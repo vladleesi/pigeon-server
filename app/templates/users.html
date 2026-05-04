@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Users · Pigeon{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<section class="card">
+  {% if users %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Public ID</th>
+        <th>Name</th>
+        <th>Key fingerprint</th>
+        <th>Chats</th>
+        <th>Created</th>
+        <th>Last seen</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td><code>{{ u.public_id }}</code></td>
+        <td>{{ u.display_name or "-" }}</td>
+        <td><code title="{{ u.fingerprint }}">{{ u.fingerprint[:16] }}...</code></td>
+        <td>
+          {% if u.chats %}
+            {% for cid in u.chats %}<span class="pill">#{{ cid }}</span>{% endfor %}
+          {% else %}-{% endif %}
+        </td>
+        <td>{{ u.created_at|fmt_dt }}</td>
+        <td>{{ u.last_seen_at|fmt_dt }}</td>
+        <td>
+          {% if u.is_active %}<span class="badge ok">active</span>
+          {% else %}<span class="badge bad">blocked</span>{% endif %}
+        </td>
+        <td>
+          {% if u.is_active %}
+          <form method="post" action="/admin/users/{{ u.id }}/deactivate">
+            <button class="danger">Block</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/users/{{ u.id }}/activate">
+            <button>Unblock</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No users yet. Create an invite link and share it with a client.</p>
+  {% endif %}
+</section>
+{% endblock %}

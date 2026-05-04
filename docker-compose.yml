@@ -1,0 +1,23 @@
+services:
+  pigeon:
+    build: .
+    image: pigeon-server:latest
+    container_name: pigeon-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - pigeon-data:/data
+      - ./exports:/exports
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pigeon-data:
+    name: pigeon-data

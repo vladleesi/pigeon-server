@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Chats · Pigeon{% endblock %}
+{% block content %}
+<h1>Chats</h1>
+<section class="card">
+  {% if chats %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Type</th>
+        <th>Title</th>
+        <th>Members</th>
+        <th>Queued ciphertext</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in chats %}
+      <tr>
+        <td>#{{ c.id }}</td>
+        <td>
+          {% if c.chat_type == "personal" %}<span class="badge">personal</span>
+          {% else %}<span class="badge alt">group</span>{% endif %}
+        </td>
+        <td>{{ c.title or "-" }}</td>
+        <td>
+          {% for pid in c.members %}<span class="pill mono">{{ pid }}</span>{% endfor %}
+        </td>
+        <td>{{ c.pending }}</td>
+        <td>{{ c.created_at|fmt_dt }}</td>
+        <td>
+          <form method="post" action="/admin/chats/{{ c.id }}/purge"
+                onsubmit="return confirm('Delete all undelivered ciphertext for this chat?');">
+            <button class="danger">Clear queue</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">
+    There is no long-term archive: queued rows only hold ciphertext until recipients read or TTL purge runs.
+  </p>
+  {% else %}
+  <p class="muted">No chats yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

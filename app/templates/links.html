@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Links · Pigeon{% endblock %}
+{% block content %}
+<h1>Invite links</h1>
+
+<section class="card">
+  <h2>Create link</h2>
+  <form method="post" action="/admin/links" class="inline">
+    <label>
+      <span>Type</span>
+      <select name="link_type" required>
+        <option value="personal">Personal (1:1)</option>
+        <option value="group">Group</option>
+      </select>
+    </label>
+    <label>
+      <span>Group title (optional)</span>
+      <input type="text" name="group_title" placeholder="Group links only">
+    </label>
+    <label>
+      <span>Expires in hours (optional)</span>
+      <input type="number" name="expires_in_hours" min="1" max="8760">
+    </label>
+    <label class="grow">
+      <span>Note</span>
+      <input type="text" name="note" maxlength="256">
+    </label>
+    <button type="submit" class="primary">Create</button>
+  </form>
+  <p class="muted small">
+    Personal links allow exactly two activations (two devices) then auto-close.
+    Group links stay open; each activation joins the same shared chat.
+  </p>
+</section>
+
+<section class="card">
+  <h2>Existing links</h2>
+  {% if links %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>URL</th>
+        <th>Chat</th>
+        <th>Uses</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Expires</th>
+        <th>Note</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for link in links %}
+      <tr>
+        <td>
+          {% if link.link_type == "personal" %}<span class="badge">personal</span>
+          {% else %}<span class="badge alt">group</span>{% endif %}
+        </td>
+        <td>
+          <input class="copy" type="text" readonly value="{{ link.url }}" onclick="this.select()">
+        </td>
+        <td>
+          {% if link.chat_id %}<span class="pill">#{{ link.chat_id }}</span>{% else %}-{% endif %}
+        </td>
+        <td>
+          {{ link.uses_count }}{% if link.max_uses %} / {{ link.max_uses }}{% endif %}
+        </td>
+        <td>
+          {% if link.is_active %}<span class="badge ok">active</span>
+          {% else %}<span class="badge bad">revoked</span>{% endif %}
+        </td>
+        <td>{{ link.created_at|fmt_dt }}</td>
+        <td>{{ link.expires_at|fmt_dt }}</td>
+        <td>{{ link.note or "-" }}</td>
+        <td>
+          {% if link.is_active %}
+          <form method="post" action="/admin/links/{{ link.id }}/revoke">
+            <button class="danger">Revoke</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/links/{{ link.id }}/reactivate">
+            <button>Restore</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No links yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

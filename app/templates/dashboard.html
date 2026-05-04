@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Overview · Pigeon{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<section class="grid">
+  <div class="card stat">
+    <span class="stat-label">Users</span>
+    <span class="stat-value">{{ stats.users }}</span>
+  </div>
+  <div class="card stat">
+    <span class="stat-label">Active links</span>
+    <span class="stat-value">{{ stats.links_active }}</span>
+  </div>
+  <div class="card stat">
+    <span class="stat-label">Chats</span>
+    <span class="stat-value">{{ stats.chats }}</span>
+  </div>
+  <div class="card stat">
+    <span class="stat-label">Queued ciphertext</span>
+    <span class="stat-value">{{ stats.pending_messages }}</span>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Quick actions</h2>
+  <ul class="actions">
+    <li><a href="/admin/links">Create an invite link</a></li>
+    <li><a href="/admin/users">Browse users</a></li>
+    <li><a href="/admin/chats">Browse chats</a></li>
+    <li><a href="/admin/export-ui">Export or import config</a></li>
+  </ul>
+</section>
+{% endblock %}
