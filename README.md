@@ -8,8 +8,6 @@ Backend for a link-only messenger. The server:
 - Does **not** keep a permanent archive: delivered and read messages are removed.
 - Provides a minimal web admin UI for monitoring and exporting/importing configuration to another host.
 
-Android and iOS apps live in separate repositories; this repo is backend only.
-
 ---
 
 ## Quick start
