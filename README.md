@@ -363,6 +363,27 @@ and group invites, encrypted-message relay, read receipts, and export/import.
 
 ---
 
+## Temporary sharing from your PC
+
+Run both listeners in one process so message delivery and revocation share the
+same connection registry:
+
+```bash
+python -m scripts.serve_shared
+```
+
+Administration is available at `http://127.0.0.1:8000/admin/links`.
+Forward an HTTPS tunnel only to `http://127.0.0.1:8001`; that listener allows
+the client, invitations, messaging API, WebSocket, static assets, and health
+check, while blocking administration and API documentation.
+
+For a temporary Cloudflare tunnel, run
+`cloudflared tunnel --url http://127.0.0.1:8001`.
+Set `PIGEON_PUBLIC_URL` to the assigned HTTPS origin before starting the Python
+process so generated invitations contain the correct public address. Keep the
+PC awake during testing; restarting a temporary tunnel changes its address.
+Store actual addresses and credentials only in local configuration.
+
 ## Project layout
 
 ```
@@ -398,6 +419,7 @@ app/
 scripts/
   create_admin.py
   export_config.py
+  serve_shared.py      local admin + restricted public listener
 
 tests/
   test_smoke.py        ASGI end-to-end smoke test
