@@ -12,7 +12,6 @@ from fastapi.staticfiles import StaticFiles
 
 from .admin_setup import ensure_default_admin
 from .cleanup import run_periodic_cleanup
-from .config import get_settings
 from .db import init_db
 from .routers import (
     admin_auth,
@@ -50,8 +49,6 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    settings = get_settings()
-
     app = FastAPI(
         title="Pigeon Server",
         version="0.1.0",

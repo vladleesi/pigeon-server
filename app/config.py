@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     secret_key: str = Field(
         default="dev-insecure-secret-change-me",
+        min_length=32,
         description="Secret for signing JWTs and admin sessions.",
     )
     public_url: str = Field(
@@ -42,6 +43,28 @@ class Settings(BaseSettings):
 
     admin_username: str | None = Field(default=None)
     admin_password: str | None = Field(default=None)
+
+    @field_validator("secret_key")
+    @classmethod
+    def _reject_placeholder_secret(cls, value: str) -> str:
+        insecure_values = {
+            "dev-insecure-secret-change-me",
+            "change-me-please-use-long-random-string",
+            "replace-this-with-output-from-the-command-above",
+        }
+        if value in insecure_values:
+            raise ValueError(
+                "PIGEON_SECRET_KEY must be replaced with a random secret"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _reject_placeholder_admin_password(self) -> "Settings":
+        if self.admin_username and self.admin_password == "change-me-too":
+            raise ValueError(
+                "PIGEON_ADMIN_PASSWORD must be replaced before creating an admin"
+            )
+        return self
 
     @property
     def db_url(self) -> str:

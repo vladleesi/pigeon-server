@@ -284,5 +284,11 @@ async def _run() -> None:
             print("smoke OK")
 
 
-if __name__ == "__main__":
+def test_smoke() -> None:
+    """Expose the end-to-end scenario to pytest."""
+
     asyncio.run(_run())
+
+
+if __name__ == "__main__":
+    test_smoke()

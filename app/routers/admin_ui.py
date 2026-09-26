@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -171,7 +170,11 @@ async def links_list(
             "uses_count": link.uses_count,
             "is_active": link.is_active and (
                 link.expires_at is None
-                or (link.expires_at if link.expires_at.tzinfo else link.expires_at.replace(tzinfo=timezone.utc))
+                or (
+                    link.expires_at
+                    if link.expires_at.tzinfo
+                    else link.expires_at.replace(tzinfo=timezone.utc)
+                )
                 > datetime.now(timezone.utc)
             ),
             "note": link.note,

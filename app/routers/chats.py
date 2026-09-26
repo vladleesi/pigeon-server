@@ -13,7 +13,6 @@ from ..config import get_settings
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import (
-    ChatMember,
     ChatType,
     PendingMessage,
     ReadReceipt,

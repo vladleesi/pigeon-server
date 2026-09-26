@@ -12,7 +12,6 @@ from .db import get_session
 from .models import Admin, User
 from .security import decode_admin_token, decode_client_token
 
-
 ADMIN_COOKIE_NAME = "pigeon_admin_session"
 
 

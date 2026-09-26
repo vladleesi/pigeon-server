@@ -1,5 +1,8 @@
 # Pigeon Server
 
+[![Tests](https://github.com/vladleesi/pigeon-server/actions/workflows/test.yml/badge.svg)](https://github.com/vladleesi/pigeon-server/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Backend for a link-only messenger. The server:
 
 - Creates and revokes **personal** (1:1) and **group** invite links.
@@ -7,6 +10,17 @@ Backend for a link-only messenger. The server:
 - Relays **client-encrypted** messages end-to-end — the server only sees ciphertext and metadata.
 - Does **not** keep a permanent archive: delivered and read messages are removed.
 - Provides a minimal web admin UI for monitoring and exporting/importing configuration to another host.
+
+> [!IMPORTANT]
+> This repository is the **server only**. It does not include an end-user mobile
+> or browser chat client. Invite pages must be opened by a compatible client
+> implementing the API documented below.
+
+## Project status
+
+Pigeon Server is pre-1.0 software intended for experimentation and community
+development. Its cryptographic protocol and implementation have not received an
+independent security audit. Do not rely on it for high-risk communications.
 
 ---
 
@@ -17,7 +31,7 @@ Backend for a link-only messenger. The server:
 Docker 24+ and Docker Compose v2.
 
 ```bash
-git clone <repo> pigeon-server
+git clone https://github.com/vladleesi/pigeon-server.git
 cd pigeon-server
 cp .env.example .env
 # Edit .env and set:
@@ -293,9 +307,9 @@ Requires Python 3.12+ (recommended). Python 3.14 may need recent pydantic wheels
 python -m venv .venv
 .venv\Scripts\Activate.ps1            # Windows
 # source .venv/bin/activate           # Linux/macOS
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
-$env:PIGEON_SECRET_KEY = "dev-secret"
+$env:PIGEON_SECRET_KEY = "local-dev-only-secret-at-least-32-characters"
 $env:PIGEON_ADMIN_USERNAME = "admin"
 $env:PIGEON_ADMIN_PASSWORD = "adminpass"
 
@@ -306,8 +320,11 @@ Smoke test:
 
 ```bash
 $env:PYTHONPATH = "."
-python tests\test_smoke.py
+python -m pytest
 ```
+
+The smoke suite uses a temporary database and exercises admin login, personal
+and group invites, encrypted-message relay, read receipts, and export/import.
 
 ---
 
@@ -347,3 +364,15 @@ scripts/
 tests/
   test_smoke.py        ASGI end-to-end smoke test
 ```
+
+---
+
+## Contributing
+
+Bug reports, feature proposals, documentation improvements, and code changes are
+welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Please report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Pigeon Server is available under the [MIT License](LICENSE).
