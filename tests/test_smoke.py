@@ -96,8 +96,9 @@ async def _run() -> None:
             ]
             assert personal_tokens and group_tokens
 
-            pt = personal_tokens[0]
-            gt = group_tokens[0]
+            # Export is ordered by ID; use the links this scenario just created.
+            pt = personal_tokens[-1]
+            gt = group_tokens[-1]
 
             # ---------- Browser test client ----------
             r = await c.get(f"/client?invite={pt}")

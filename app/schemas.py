@@ -64,6 +64,8 @@ class LinkActivateResponse(BaseModel):
 class MeResponse(BaseModel):
     user: ParticipantInfo
     chats: list[ChatInfo]
+    access_expires_at: datetime | None = None
+    server_time: datetime | None = None
 
 
 class MessageEnvelope(BaseModel):

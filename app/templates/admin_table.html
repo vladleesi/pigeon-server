@@ -1,0 +1,27 @@
+{% macro selection_toolbar(resource, description, cleanup_label='', cleanup_confirm='') %}
+<div class="table-toolbar">
+{% if cleanup_label %}
+<form method="post" action="/admin/{{ resource }}/cleanup" data-confirm="{{ cleanup_confirm }}">
+  <input type="hidden" name="confirm" value="delete">
+  <button class="danger" type="submit">{{ cleanup_label }}</button>
+</form>
+{% endif %}
+<form id="selection-{{ resource }}" class="selection-toolbar" method="post"
+      action="/admin/{{ resource }}/delete-selected" data-selection-form
+      data-confirm="{{ description }}" data-confirm-label="Delete selected">
+  <input type="hidden" name="confirm" value="delete">
+  <span class="muted small" data-selection-count aria-live="polite">0 selected</span>
+  <button class="danger" type="submit" disabled>Delete selected</button>
+</form>
+</div>
+{% endmacro %}
+
+{% macro select_all(resource) %}
+<th class="selection-cell"><input type="checkbox" data-select-all="selection-{{ resource }}"
+    aria-label="Select all {{ resource }}"></th>
+{% endmacro %}
+
+{% macro select_row(resource, id) %}
+<td class="selection-cell"><input type="checkbox" name="ids" value="{{ id }}"
+    form="selection-{{ resource }}" aria-label="Select {{ resource }} #{{ id }}"></td>
+{% endmacro %}

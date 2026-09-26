@@ -1,12 +1,16 @@
 {% extends "base.html" %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
 {% block title %}Users · Pigeon{% endblock %}
 {% block content %}
 <h1>Users</h1>
 <section class="card">
   {% if users %}
+  {{ selection_toolbar('users', 'Delete the selected users, memberships and pending messages? This cannot be undone.', 'Delete blocked', 'Permanently delete all blocked users, their memberships and pending messages?') }}
+  <div class="table-scroll">
   <table class="data">
     <thead>
       <tr>
+        {{ select_all('users') }}
         <th>Public ID</th>
         <th>Name</th>
         <th>Key fingerprint</th>
@@ -20,6 +24,7 @@
     <tbody>
       {% for u in users %}
       <tr>
+        {{ select_row('users', u.id) }}
         <td><code>{{ u.public_id }}</code></td>
         <td>{{ u.display_name or "-" }}</td>
         <td><code title="{{ u.fingerprint }}">{{ u.fingerprint[:16] }}...</code></td>
@@ -35,6 +40,7 @@
           {% else %}<span class="badge bad">blocked</span>{% endif %}
         </td>
         <td>
+          <div class="row-actions">
           {% if u.is_active %}
           <form method="post" action="/admin/users/{{ u.id }}/deactivate">
             <button class="danger">Block</button>
@@ -44,11 +50,17 @@
             <button>Unblock</button>
           </form>
           {% endif %}
+          <form method="post" action="/admin/users/{{ u.id }}/delete" data-confirm="Permanently delete this user, their memberships and pending messages?">
+            <input type="hidden" name="confirm" value="delete">
+            <button class="danger">Delete</button>
+          </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p class="muted">No users yet. Create an invite link and share it with a client.</p>
   {% endif %}

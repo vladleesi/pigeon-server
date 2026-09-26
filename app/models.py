@@ -101,6 +101,7 @@ class Link(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     link_type: Mapped[LinkType] = mapped_column(
         Enum(LinkType, native_enum=False, length=16), nullable=False
     )

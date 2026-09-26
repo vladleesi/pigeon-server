@@ -34,9 +34,16 @@ async def resolve_client_user(session: AsyncSession, token: str) -> User | None:
         or not user.is_active
         or user.public_id != payload.get("pid")
         or link is None
+        or link.is_deleted
         or link.revoked_at is not None
     ):
         return None
+    if link.expires_at is not None:
+        expiry = link.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry <= datetime.now(timezone.utc):
+            return None
     return user
 
 

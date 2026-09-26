@@ -64,7 +64,12 @@ async def init_db() -> None:
         # links are treated as revoked once, which safely invalidates legacy
         # JWTs that did not carry an invite id.
         columns = await conn.execute(text("PRAGMA table_info(links)"))
-        if "revoked_at" not in {row[1] for row in columns}:
+        column_names = {row[1] for row in columns}
+        if "is_deleted" not in column_names:
+            await conn.execute(text(
+                "ALTER TABLE links ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0"
+            ))
+        if "revoked_at" not in column_names:
             await conn.execute(text("ALTER TABLE links ADD COLUMN revoked_at DATETIME"))
             await conn.execute(
                 text(

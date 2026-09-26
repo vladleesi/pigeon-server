@@ -46,6 +46,13 @@ test('naive server UTC and explicit UTC have identical ordering', async () => {
   assert.equal(run('messagesByChat.get(7).map(e => e.id).join(",")'), 'old,new');
 });
 
+test('session timer formats days, rounds seconds and clamps expiry', () => {
+  const run = client();
+  assert.equal(run('formatTimeRemaining(1001)'), '00:00:02');
+  assert.equal(run('formatTimeRemaining(90061000)'), '1d 01:01:01');
+  assert.equal(run('formatTimeRemaining(-1000)'), '00:00:00');
+});
+
 test('failed local persistence can retry without acknowledging an unsaved message', async () => {
   const run = client();
   await run(`(async () => {

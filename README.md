@@ -365,6 +365,25 @@ and group invites, encrypted-message relay, read receipts, and export/import.
 
 ## Temporary sharing from your PC
 
+The client shows a countdown for invites with an expiration date, using server
+time (and the earlier JWT deadline when applicable). Invites without a deadline
+hide the countdown; the configured JWT lifetime still applies to authentication.
+Expired invites also end access for their issued sessions.
+
+In the admin links page, **Restore** removes an explicit revocation while
+preserving the activation limit. A fully used personal link remains closed to
+new participants. Existing clients can use **Reconnect saved session** after
+restoration; expired links require a new invite.
+
+The admin pages support individual deletion, checkbox selection for bulk deletion
+of users, links and chats, and cleanup of blocked users or revoked/expired links.
+All destructive actions use a shared confirmation dialog. Deleting chats also
+removes their memberships, queued messages and receipts, and invalidates their
+invite links. Deleting users removes memberships,
+pending messages and receipts. Deleting links invalidates their sessions and
+removes the invite token and note; an internal tombstone prevents ID reuse from
+reviving old JWTs. Fully used, non-revoked links are excluded from bulk cleanup.
+
 Run both listeners in one process so message delivery and revocation share the
 same connection registry:
 

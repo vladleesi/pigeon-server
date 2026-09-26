@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
 {% block title %}Links · Pigeon{% endblock %}
 {% block content %}
 <h1>Invite links</h1>
+{% if link_error %}<p role="alert" class="badge bad">{{ link_error }}</p>{% endif %}
 
 <section class="card">
   <h2>Create link</h2>
@@ -42,9 +44,12 @@
 <section class="card">
   <h2>Existing links</h2>
   {% if links %}
+  {{ selection_toolbar('links', 'Delete the selected links? Their sessions will stop working. This cannot be undone.', 'Delete revoked / expired', 'Delete revoked and expired links? Their sessions will stop working. This cannot be undone.') }}
+  <div class="table-scroll">
   <table class="data">
     <thead>
       <tr>
+        {{ select_all('links') }}
         <th>Type</th>
         <th>URL</th>
         <th>Chat</th>
@@ -59,6 +64,7 @@
     <tbody>
       {% for link in links %}
       <tr>
+        {{ select_row('links', link.id) }}
         <td>
           {% if link.link_type == "personal" %}<span class="badge">personal</span>
           {% else %}<span class="badge alt">group</span>{% endif %}
@@ -73,27 +79,37 @@
           {{ link.uses_count }}{% if link.max_uses %} / {{ link.max_uses }}{% endif %}
         </td>
         <td>
-          {% if link.is_active %}<span class="badge ok">active</span>
-          {% else %}<span class="badge bad">revoked</span>{% endif %}
+          {% if link.is_expired %}<span class="badge bad">expired</span>
+          {% elif link.is_revoked %}<span class="badge bad">revoked</span>
+          {% elif link.is_full %}<span class="badge">fully used</span>
+          {% elif link.is_active %}<span class="badge ok">active</span>
+          {% else %}<span class="badge">inactive</span>{% endif %}
         </td>
         <td>{{ link.created_at|fmt_dt }}</td>
         <td>{{ link.expires_at|fmt_dt }}</td>
         <td>{{ link.note or "-" }}</td>
         <td>
-          {% if link.is_active %}
+          <div class="row-actions">
+          {% if not link.is_revoked and not link.is_expired %}
           <form method="post" action="/admin/links/{{ link.id }}/revoke">
             <button class="danger">Revoke</button>
           </form>
-          {% else %}
+          {% elif not link.is_expired %}
           <form method="post" action="/admin/links/{{ link.id }}/reactivate">
             <button>Restore</button>
           </form>
           {% endif %}
+          <form method="post" action="/admin/links/{{ link.id }}/delete" data-confirm="Delete this link and invalidate its sessions? This cannot be undone.">
+            <input type="hidden" name="confirm" value="delete">
+            <button class="danger">Delete</button>
+          </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p class="muted">No links yet.</p>
   {% endif %}

@@ -53,7 +53,9 @@ async def export_bundle(
     )
     chats = list(chats_result.scalars().all())
 
-    links_result = await session.execute(select(Link).order_by(Link.id.asc()))
+    links_result = await session.execute(
+        select(Link).where(Link.is_deleted == False).order_by(Link.id.asc())  # noqa: E712
+    )
     links = list(links_result.scalars().all())
 
     chat_index_by_id: dict[int, int] = {c.id: i for i, c in enumerate(chats)}

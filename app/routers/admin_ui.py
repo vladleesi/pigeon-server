@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,9 +21,11 @@ from ..models import (
     Link,
     LinkType,
     PendingMessage,
+    ReadReceipt,
     User,
 )
 from ..security import generate_link_token, public_key_fingerprint
+from ..services import _link_expired
 from ..templates import templates
 from ..ws_manager import manager as ws_manager
 
@@ -159,7 +161,9 @@ async def links_list(
     if admin is None:
         return RedirectResponse(url="/admin/login", status_code=303)
 
-    result = await session.execute(select(Link).order_by(Link.created_at.desc()))
+    result = await session.execute(
+        select(Link).where(Link.is_deleted == False).order_by(Link.created_at.desc())  # noqa: E712
+    )
     items = list(result.scalars().all())
     rows = [
         {
@@ -169,6 +173,9 @@ async def links_list(
             "chat_id": link.chat_id,
             "max_uses": link.max_uses,
             "uses_count": link.uses_count,
+            "is_expired": _link_expired(link),
+            "is_revoked": link.revoked_at is not None,
+            "is_full": bool(link.max_uses and link.uses_count >= link.max_uses),
             "is_active": link.is_active and (
                 link.expires_at is None
                 or (
@@ -190,6 +197,7 @@ async def links_list(
         "links.html",
         {"admin": admin, "links": rows, "public_url": _settings.public_url,
          "form_values": getattr(request.state, "form_values", {}),
+         "link_error": getattr(request.state, "link_error", None),
          "field_errors": getattr(request.state, "field_errors", {})},
         status_code=422 if getattr(request.state, "field_errors", {}) else 200,
     )
@@ -255,7 +263,7 @@ async def revoke_link(
     session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
     link = await session.get(Link, link_id)
-    if link is None:
+    if link is None or link.is_deleted:
         raise HTTPException(status_code=404, detail="link not found")
     link.is_active = False
     link.revoked_at = datetime.now(timezone.utc)
@@ -273,19 +281,185 @@ async def revoke_link(
 @router.post("/links/{link_id}/reactivate")
 async def reactivate_link(
     link_id: int,
+    request: Request,
     admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
-) -> RedirectResponse:
+) -> Response:
     link = await session.get(Link, link_id)
-    if link is None:
+    if link is None or link.is_deleted:
         raise HTTPException(status_code=404, detail="link not found")
-    # Reactivate only links that still have spare capacity.
-    if link.max_uses and link.uses_count >= link.max_uses:
-        raise HTTPException(status_code=400, detail="link fully used; create a new one")
-    link.is_active = True
+    if _link_expired(link):
+        request.state.link_error = "This link has expired. Create a new link."
+        return await links_list(request, admin, session)
+    # Restore existing access without opening a full personal chat to new users.
+    link.is_active = not (link.max_uses and link.uses_count >= link.max_uses)
     link.revoked_at = None
     await session.commit()
     return RedirectResponse(url="/admin/links", status_code=303)
+
+
+async def _delete_users(session: AsyncSession, users: list[User]) -> None:
+    ids = {user.id for user in users}
+    pids = {user.public_id for user in users}
+    if not ids:
+        return
+    await session.execute(delete(PendingMessage).where(or_(
+        PendingMessage.sender_id.in_(ids), PendingMessage.recipient_id.in_(ids),
+    )))
+    await session.execute(delete(ReadReceipt).where(or_(
+        ReadReceipt.sender_id.in_(ids), ReadReceipt.reader_public_id.in_(pids),
+    )))
+    await session.execute(delete(ChatMember).where(ChatMember.user_id.in_(ids)))
+    await session.execute(delete(User).where(User.id.in_(ids)))
+    await session.commit()
+    await ws_manager.revoke(ids)
+
+
+async def _delete_links(
+    session: AsyncSession, links: list[Link], *, commit: bool = True,
+) -> set[int]:
+    chat_ids = {link.chat_id for link in links if link.chat_id is not None}
+    users = await session.scalars(select(ChatMember.user_id).where(
+        ChatMember.chat_id.in_(chat_ids)
+    ))
+    user_ids = set(users.all())
+    for link in links:
+        # Keep only a tombstone ID: SQLite must never reuse a JWT's issuing
+        # link ID. Remove the invite token, note and chat association.
+        link.is_deleted = True
+        link.is_active = False
+        link.revoked_at = datetime.now(timezone.utc)
+        link.token = generate_link_token()
+        link.note = None
+        link.chat_id = None
+    if commit:
+        await session.commit()
+        await ws_manager.revoke(user_ids)
+    return user_ids
+
+
+async def _delete_chats(session: AsyncSession, chat_ids: set[int]) -> None:
+    if not chat_ids:
+        return
+    users = set((await session.scalars(
+        select(ChatMember.user_id).where(ChatMember.chat_id.in_(chat_ids))
+    )).all())
+    links = list((await session.scalars(
+        select(Link).where(Link.chat_id.in_(chat_ids))
+    )).all())
+    await _delete_links(session, links, commit=False)
+    # Apply the link tombstones before deleting chats, including on databases
+    # that enforce foreign keys. All mutations belong to one transaction.
+    await session.flush()
+    await session.execute(delete(PendingMessage).where(PendingMessage.chat_id.in_(chat_ids)))
+    await session.execute(delete(ReadReceipt).where(ReadReceipt.chat_id.in_(chat_ids)))
+    await session.execute(delete(ChatMember).where(ChatMember.chat_id.in_(chat_ids)))
+    await session.execute(delete(Chat).where(Chat.id.in_(chat_ids)))
+    await session.commit()
+    await ws_manager.revoke(users)
+
+
+@router.post("/{resource}/delete-selected")
+async def delete_selected(
+    resource: str,
+    ids: list[int] = Form(...),
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    selected = set(ids)
+    if not selected or len(selected) > 500:
+        raise HTTPException(status_code=400, detail="select between 1 and 500 items")
+    if resource == "users":
+        users = await session.scalars(select(User).where(User.id.in_(selected)))
+        await _delete_users(session, list(users.all()))
+    elif resource == "links":
+        links = await session.scalars(select(Link).where(
+            Link.id.in_(selected), Link.is_deleted == False,  # noqa: E712
+        ))
+        await _delete_links(session, list(links.all()))
+    elif resource == "chats":
+        await _delete_chats(session, selected)
+    else:
+        raise HTTPException(status_code=404, detail="unknown resource")
+    return RedirectResponse(f"/admin/{resource}", status_code=303)
+
+
+@router.post("/chats/{chat_id}/delete")
+async def delete_chat(
+    chat_id: int,
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    if await session.get(Chat, chat_id) is None:
+        raise HTTPException(status_code=404, detail="chat not found")
+    await _delete_chats(session, {chat_id})
+    return RedirectResponse("/admin/chats", status_code=303)
+
+
+@router.post("/users/{user_id}/delete")
+async def delete_user(
+    user_id: int,
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    await _delete_users(session, [user])
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@router.post("/users/cleanup")
+async def cleanup_users(
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    users = await session.scalars(select(User).where(User.is_active == False))  # noqa: E712
+    await _delete_users(session, list(users.all()))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@router.post("/links/{link_id}/delete")
+async def delete_link(
+    link_id: int,
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    link = await session.get(Link, link_id)
+    if link is None or link.is_deleted:
+        raise HTTPException(status_code=404, detail="link not found")
+    await _delete_links(session, [link])
+    return RedirectResponse("/admin/links", status_code=303)
+
+
+@router.post("/links/cleanup")
+async def cleanup_links(
+    confirm: str = Form(...),
+    admin: Admin = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if confirm != "delete":
+        raise HTTPException(status_code=400, detail="confirmation required")
+    links = await session.scalars(select(Link).where(Link.is_deleted == False))  # noqa: E712
+    await _delete_links(session, [
+        link for link in links if link.revoked_at is not None or _link_expired(link)
+    ])
+    return RedirectResponse("/admin/links", status_code=303)
 
 
 @router.get("/chats", response_class=HTMLResponse)

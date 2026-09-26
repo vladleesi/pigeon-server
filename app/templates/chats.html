@@ -1,12 +1,16 @@
 {% extends "base.html" %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
 {% block title %}Chats · Pigeon{% endblock %}
 {% block content %}
 <h1>Chats</h1>
 <section class="card">
   {% if chats %}
+  {{ selection_toolbar('chats', 'Delete the selected chats, memberships, queued messages and receipts? Their invite links will also be deleted. This cannot be undone.') }}
+  <div class="table-scroll">
   <table class="data">
     <thead>
       <tr>
+        {{ select_all('chats') }}
         <th>#</th>
         <th>Type</th>
         <th>Title</th>
@@ -19,6 +23,7 @@
     <tbody>
       {% for c in chats %}
       <tr>
+        {{ select_row('chats', c.id) }}
         <td>#{{ c.id }}</td>
         <td>
           {% if c.chat_type == "personal" %}<span class="badge">personal</span>
@@ -31,15 +36,23 @@
         <td>{{ c.pending }}</td>
         <td>{{ c.created_at|fmt_dt }}</td>
         <td>
+          <div class="row-actions">
           <form method="post" action="/admin/chats/{{ c.id }}/purge"
-                onsubmit="return confirm('Delete all undelivered ciphertext for this chat?');">
+                data-confirm="Delete all undelivered ciphertext for this chat?" data-confirm-label="Clear queue">
             <button class="danger">Clear queue</button>
           </form>
+          <form method="post" action="/admin/chats/{{ c.id }}/delete"
+                data-confirm="Delete this chat, its memberships, queued messages, receipts and invite links? This cannot be undone.">
+            <input type="hidden" name="confirm" value="delete">
+            <button class="danger">Delete</button>
+          </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
   <p class="muted small">
     There is no long-term archive: queued rows only hold ciphertext until recipients read or TTL purge runs.
   </p>

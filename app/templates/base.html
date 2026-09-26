@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Pigeon{% endblock %}</title>
-  <link rel="stylesheet" href="/static/admin.css">
+  <link rel="stylesheet" href="/static/admin.css?v=5">
+  <script src="/static/admin-actions.js?v=2" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -27,6 +28,14 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+    <h2 id="confirm-title">Confirm deletion</h2>
+    <p id="confirm-description" class="muted"></p>
+    <div class="dialog-actions">
+      <button id="confirm-cancel" type="button" autofocus>Cancel</button>
+      <button id="confirm-accept" class="danger" type="button">Delete</button>
+    </div>
+  </dialog>
   <footer class="footer">
     <span>Pigeon Server &middot; payloads are encrypted on the client</span>
   </footer>

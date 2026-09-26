@@ -39,6 +39,7 @@ let socket = null;
 let reconnectTimer = null;
 let heartbeatTimer = null;
 let socketAuthTimer = null;
+let accessDeadline = null;
 let inboundQueue = Promise.resolve();
 const messagesByChat = new Map();
 const seenMessageIds = new Set();
@@ -266,7 +267,10 @@ class SessionExpiredError extends Error {}
 
 async function invalidateSession(reason = "Session expired") {
   if (!identity) return;
+  if (identity.token) identity.suspendedToken = identity.token;
   identity.token = null;
+  accessDeadline = null;
+  updateSessionCountdown();
   await writeIdentity(identity);
   chats = [];
   selectedChatId = null;
@@ -542,6 +546,7 @@ function updateIdentityUi() {
   const active = Boolean(identity?.token && identity?.publicId);
   elements.setupPanel.hidden = active;
   elements.clientPanel.hidden = !active;
+  document.querySelector("#reconnect-session").hidden = active || !identity?.suspendedToken;
   updateConnectionState(false);
 }
 
@@ -556,6 +561,10 @@ function updateConnectionState(connected) {
 async function loadChats() {
   if (!identity?.token) return;
   const data = await api("/api/v1/me");
+  accessDeadline = data.access_expires_at
+    ? performance.now() + serverTimestamp(data.access_expires_at) - serverTimestamp(data.server_time)
+    : null;
+  updateSessionCountdown();
   if (data.user.public_key !== identity.publicKey) {
     throw new Error("Server identity does not match this device key. Reset this device.");
   }
@@ -808,6 +817,7 @@ elements.activationForm.addEventListener("submit", async (event) => {
       seenReceiptIds.clear();
     }
     identity.token = result.token;
+    identity.suspendedToken = null;
     identity.publicId = result.user.public_id;
     await writeIdentity(identity);
     history.replaceState(null, "", "/client");
@@ -821,6 +831,14 @@ elements.activationForm.addEventListener("submit", async (event) => {
   } finally {
     submitButton.disabled = false;
   }
+});
+
+elements.messageInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !event.shiftKey || event.isComposing
+      || event.ctrlKey || event.altKey || event.metaKey) return;
+  event.preventDefault();
+  if (event.repeat || elements.messageInput.disabled || elements.sendButton.disabled) return;
+  elements.messageForm.requestSubmit(elements.sendButton);
 });
 
 elements.messageForm.addEventListener("submit", async (event) => {
@@ -859,6 +877,26 @@ elements.messageForm.addEventListener("submit", async (event) => {
 });
 
 elements.refreshButton.addEventListener("click", refresh);
+document.querySelector("#reconnect-session").addEventListener("click", async (event) => {
+  if (!identity?.suspendedToken) return;
+  event.target.disabled = true;
+  identity.token = identity.suspendedToken;
+  try {
+    await loadChats();
+    identity.suspendedToken = null;
+    await writeIdentity(identity);
+    updateIdentityUi();
+    connectSocket();
+    await synchronize();
+  } catch (error) {
+    identity.token = null;
+    await writeIdentity(identity);
+    updateIdentityUi();
+    showToast(errorMessage(error), true);
+  } finally {
+    event.target.disabled = false;
+  }
+});
 elements.resetButton.addEventListener("click", async () => {
   const confirmed = window.confirm(
     "Remove this browser's private key and session? Existing chats cannot be recovered on this device.",
@@ -881,6 +919,30 @@ async function start() {
     connectSocket();
   }
   window.setInterval(synchronize, POLL_INTERVAL_MS);
+  window.setInterval(updateSessionCountdown, 1000);
+}
+
+function formatTimeRemaining(milliseconds) {
+  const total = Math.max(0, Math.ceil(milliseconds / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor(total / 3600) % 24;
+  const minutes = Math.floor(total / 60) % 60;
+  const seconds = total % 60;
+  const clock = [hours, minutes, seconds].map(value => String(value).padStart(2, "0")).join(":");
+  return `${days ? `${days}d ` : ""}${clock}`;
+}
+
+function updateSessionCountdown() {
+  const element = document.querySelector("#session-countdown");
+  if (!element) return;
+  element.hidden = !identity?.token || accessDeadline === null;
+  if (element.hidden) return;
+  const remaining = accessDeadline - performance.now();
+  element.textContent = `Session expires in ${formatTimeRemaining(remaining)}`;
+  if (remaining <= 0) {
+    accessDeadline = null;
+    void invalidateSession("Session expired").catch(error => showToast(errorMessage(error), true));
+  }
 }
 
 window.addEventListener("online", () => {
