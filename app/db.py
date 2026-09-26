@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -58,3 +59,16 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight in-place migration for installations created before
+        # invite revocation was tied to client sessions. Existing inactive
+        # links are treated as revoked once, which safely invalidates legacy
+        # JWTs that did not carry an invite id.
+        columns = await conn.execute(text("PRAGMA table_info(links)"))
+        if "revoked_at" not in {row[1] for row in columns}:
+            await conn.execute(text("ALTER TABLE links ADD COLUMN revoked_at DATETIME"))
+            await conn.execute(
+                text(
+                    "UPDATE links SET revoked_at = CURRENT_TIMESTAMP "
+                    "WHERE is_active = 0"
+                )
+            )

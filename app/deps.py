@@ -9,10 +9,35 @@ from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
-from .models import Admin, User
+from .models import Admin, Link, User
 from .security import decode_admin_token, decode_client_token
 
 ADMIN_COOKIE_NAME = "pigeon_admin_session"
+
+
+async def resolve_client_user(session: AsyncSession, token: str) -> User | None:
+    """Resolve a JWT only while its user and issuing invite remain valid."""
+
+    try:
+        payload = decode_client_token(token)
+        if payload.get("typ") != "client":
+            return None
+        user_id = int(payload.get("sub") or 0)
+        link_id = int(payload.get("lid") or 0)
+    except (jwt.InvalidTokenError, TypeError, ValueError):
+        return None
+
+    user = await session.get(User, user_id)
+    link = await session.get(Link, link_id)
+    if (
+        user is None
+        or not user.is_active
+        or user.public_id != payload.get("pid")
+        or link is None
+        or link.revoked_at is not None
+    ):
+        return None
+    return user
 
 
 async def get_current_user(
@@ -22,24 +47,9 @@ async def get_current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
-    try:
-        payload = decode_client_token(token)
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(status_code=401, detail="token expired") from exc
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=401, detail="invalid token") from exc
-
-    if payload.get("typ") != "client":
-        raise HTTPException(status_code=401, detail="wrong token type")
-
-    try:
-        user_id = int(payload.get("sub") or 0)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=401, detail="invalid token subject") from exc
-
-    user = await session.get(User, user_id)
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=401, detail="user not found")
+    user = await resolve_client_user(session, token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid or revoked session")
 
     user.last_seen_at = datetime.now(timezone.utc)
     await session.commit()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,6 +25,7 @@ from ..models import (
 )
 from ..security import generate_link_token, public_key_fingerprint
 from ..templates import templates
+from ..ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/admin", tags=["admin-ui"])
 
@@ -187,7 +188,10 @@ async def links_list(
     return templates.TemplateResponse(
         request,
         "links.html",
-        {"admin": admin, "links": rows, "public_url": _settings.public_url},
+        {"admin": admin, "links": rows, "public_url": _settings.public_url,
+         "form_values": getattr(request.state, "form_values", {}),
+         "field_errors": getattr(request.state, "field_errors", {})},
+        status_code=422 if getattr(request.state, "field_errors", {}) else 200,
     )
 
 
@@ -196,18 +200,32 @@ async def create_link(
     request: Request,
     link_type: str = Form(...),
     note: str | None = Form(default=None),
-    expires_in_hours: int | None = Form(default=None),
+    expires_in_hours: str | None = Form(default=None),
     group_title: str | None = Form(default=None),
     admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
-) -> RedirectResponse:
+) -> Response:
     if link_type not in ("personal", "group"):
         raise HTTPException(status_code=400, detail="invalid link type")
     lt = LinkType(link_type)
 
     expires_at = None
-    if expires_in_hours:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+    expiry = (expires_in_hours or "").strip()
+    if expiry:
+        try:
+            hours = int(expiry)
+            if not 1 <= hours <= 8760:
+                raise ValueError
+        except ValueError:
+            request.state.form_values = {
+                "link_type": link_type, "note": note or "",
+                "group_title": group_title or "", "expires_in_hours": expiry,
+            }
+            request.state.field_errors = {
+                "expires_in_hours": "Enter a whole number from 1 to 8760.",
+            }
+            return await links_list(request, admin, session)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     link = Link(
         token=generate_link_token(),
@@ -240,7 +258,15 @@ async def revoke_link(
     if link is None:
         raise HTTPException(status_code=404, detail="link not found")
     link.is_active = False
+    link.revoked_at = datetime.now(timezone.utc)
+    user_ids: set[int] = set()
+    if link.chat_id is not None:
+        result = await session.execute(
+            select(ChatMember.user_id).where(ChatMember.chat_id == link.chat_id)
+        )
+        user_ids = set(result.scalars().all())
     await session.commit()
+    await ws_manager.revoke(user_ids)
     return RedirectResponse(url="/admin/links", status_code=303)
 
 
@@ -257,6 +283,7 @@ async def reactivate_link(
     if link.max_uses and link.uses_count >= link.max_uses:
         raise HTTPException(status_code=400, detail="link fully used; create a new one")
     link.is_active = True
+    link.revoked_at = None
     await session.commit()
     return RedirectResponse(url="/admin/links", status_code=303)
 

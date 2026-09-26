@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Pigeon test client</title>
+  <link rel="stylesheet" href="/static/client.css?v=4">
+  <script src="/static/client.js?v=6" defer></script>
+</head>
+<body>
+  <header class="client-header">
+    <div>
+      <a class="client-brand" href="/client">Pigeon</a>
+      <span class="test-badge">Test client</span>
+    </div>
+    <div class="identity-line">
+      <span id="connection-state" class="status-dot" aria-hidden="true"></span>
+      <span id="identity-label">No local identity</span>
+      <button id="reset-button" class="button subtle" type="button">Reset device</button>
+    </div>
+  </header>
+
+  <main class="client-shell">
+    <section class="security-notice" aria-labelledby="security-heading">
+      <div>
+        <strong id="security-heading">Testing only</strong>
+        <span>Keys stay in this browser and messages are encrypted before upload.</span>
+      </div>
+      <p>This client is not independently audited. Use HTTPS anywhere except localhost.</p>
+    </section>
+
+    <section id="setup-panel" class="setup-panel" aria-labelledby="setup-heading">
+      <div>
+        <p class="eyebrow">Join a conversation</p>
+        <h1 id="setup-heading">Activate an invite</h1>
+        <p class="muted">A device identity is generated locally. The private key never leaves this browser.</p>
+      </div>
+      <form id="activation-form" class="activation-form">
+        <label>
+          Invite token
+          <input id="invite-token" name="invite" value="{{ invite_token }}" maxlength="128"
+                 autocomplete="off" spellcheck="false" required>
+        </label>
+        <label>
+          Display name
+          <input id="display-name" name="display_name" maxlength="64"
+                 autocomplete="nickname" placeholder="Your name" required
+                 aria-describedby="display-name-error">
+          <small id="display-name-error" role="alert" hidden></small>
+        </label>
+        <button class="button primary" type="submit">Activate securely</button>
+      </form>
+    </section>
+
+    <div id="client-panel" class="client-grid" hidden>
+      <aside class="chat-sidebar" aria-labelledby="chats-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Conversations</p>
+            <h2 id="chats-heading">Chats</h2>
+          </div>
+          <button id="refresh-button" class="button subtle" type="button">Refresh</button>
+        </div>
+        <div id="chat-list" class="chat-list" role="list"></div>
+      </aside>
+
+      <section class="conversation" aria-labelledby="conversation-title">
+        <div class="conversation-heading">
+          <div>
+            <p id="conversation-kind" class="eyebrow">Select a chat</p>
+            <h2 id="conversation-title">No conversation selected</h2>
+            <p id="participant-keys" class="key-line"></p>
+          </div>
+          <span id="participant-count" class="muted"></span>
+        </div>
+
+        <div id="message-list" class="message-list" role="log" aria-live="polite">
+          <p class="empty-state">Choose a conversation to view messages.</p>
+        </div>
+
+        <form id="message-form" class="composer">
+          <label class="sr-only" for="message-input">Message</label>
+          <textarea id="message-input" maxlength="16000" rows="2"
+                    placeholder="Write an encrypted test message" disabled></textarea>
+          <button id="send-button" class="button primary" type="submit" disabled>Send</button>
+        </form>
+      </section>
+    </div>
+
+    <div id="status-message" class="toast" role="status" aria-live="polite" hidden></div>
+    <div id="error-message" class="toast error" role="alert" hidden></div>
+  </main>
+
+  <footer class="client-footer">
+    Local history is encrypted on this device. Reset device permanently removes it and the private key.
+  </footer>
+</body>
+</html>

@@ -5,25 +5,31 @@
 
 <section class="card">
   <h2>Create link</h2>
-  <form method="post" action="/admin/links" class="inline">
+  <script src="/static/link-form.js" defer></script>
+  {% set values = form_values|default({}) %}
+  {% set errors = field_errors|default({}) %}
+  <form id="create-link-form" method="post" action="/admin/links" class="inline">
     <label>
       <span>Type</span>
       <select name="link_type" required>
         <option value="personal">Personal (1:1)</option>
-        <option value="group">Group</option>
+        <option value="group" {% if values.get('link_type') == 'group' %}selected{% endif %}>Group</option>
       </select>
     </label>
     <label>
       <span>Group title (optional)</span>
-      <input type="text" name="group_title" placeholder="Group links only">
+      <input type="text" name="group_title" placeholder="Group links only" value="{{ values.get('group_title', '') }}">
     </label>
     <label>
       <span>Expires in hours (optional)</span>
-      <input type="number" name="expires_in_hours" min="1" max="8760">
+      <input id="expires-in-hours" type="number" name="expires_in_hours" min="1" max="8760" step="1"
+             value="{{ values.get('expires_in_hours', '') }}" aria-describedby="expiry-error"
+             aria-invalid="{{ 'true' if errors.get('expires_in_hours') else 'false' }}">
+      <small id="expiry-error" role="alert" style="color: #c0392b" {% if not errors.get('expires_in_hours') %}hidden{% endif %}>{{ errors.get('expires_in_hours', '') }}</small>
     </label>
     <label class="grow">
       <span>Note</span>
-      <input type="text" name="note" maxlength="256">
+      <input type="text" name="note" maxlength="256" value="{{ values.get('note', '') }}">
     </label>
     <button type="submit" class="primary">Create</button>
   </form>

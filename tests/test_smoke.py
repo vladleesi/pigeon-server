@@ -60,12 +60,23 @@ async def _run() -> None:
             # ---------- Create personal link ----------
             r = await c.post(
                 "/admin/links",
-                data={"link_type": "personal", "note": "alice<->bob"},
+                data={"link_type": "personal", "note": "alice<->bob", "expires_in_hours": ""},
                 follow_redirects=False,
             )
             assert r.status_code == 303, r.text
 
             # ---------- Create group link ----------
+            for expiry in ("0", "8761", "1.5", "invalid"):
+                invalid = await c.post(
+                    "/admin/links",
+                    data={"link_type": "group", "expires_in_hours": expiry,
+                          "group_title": "Keep my title"},
+                )
+                assert invalid.status_code == 422
+                assert invalid.headers["content-type"].startswith("text/html")
+                assert "Enter a whole number from 1 to 8760." in invalid.text
+                assert "Keep my title" in invalid.text
+
             r = await c.post(
                 "/admin/links",
                 data={"link_type": "group", "group_title": "Ops"},
@@ -87,6 +98,26 @@ async def _run() -> None:
 
             pt = personal_tokens[0]
             gt = group_tokens[0]
+
+            # ---------- Browser test client ----------
+            r = await c.get(f"/client?invite={pt}")
+            assert r.status_code == 200
+            assert "Pigeon test client" in r.text
+            assert f'value="{pt}"' in r.text
+            assert r.headers["cache-control"] == "no-store"
+            assert "default-src 'none'" in r.headers["content-security-policy"]
+            assert r.headers["x-frame-options"] == "DENY"
+
+            r = await c.get("/static/client.js")
+            assert r.status_code == 200
+            assert "X25519-2DH-HKDF-SHA256-AES256GCM" in r.text
+            assert "persistHistoryEntry" in r.text
+            assert "compareHistoryEntries" in r.text
+            assert 'type: "auth", token: identity.token' in r.text
+
+            r = await c.get(f"/l/{pt}")
+            assert r.status_code == 200
+            assert f"/client?invite={pt}" in r.text
 
             # ---------- Two clients activate the personal link ----------
             alice_pub, _ = _random_keypair()

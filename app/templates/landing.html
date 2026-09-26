@@ -9,8 +9,9 @@
     {% else %}
     <p>This is a <b>group</b> invite link.</p>
     {% endif %}
-    <p>Open it inside the Pigeon mobile app to activate.</p>
-    <p class="muted small">Activation intentionally happens in-app — browser-only access is not supported.</p>
+    <p>Open it in a compatible Pigeon client to activate.</p>
+    <p><a class="button primary" href="/client?invite={{ token }}">Open test web client</a></p>
+    <p class="muted small">The bundled browser client is intended for testing and is not independently audited.</p>
     <div class="token-box">
       <code>{{ token }}</code>
     </div>

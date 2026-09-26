@@ -2,38 +2,36 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime, timezone
 
-import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import SessionLocal
+from ..deps import resolve_client_user
 from ..models import PendingMessage, ReadReceipt, User
 from ..schemas import IncomingMessage, IncomingReadReceipt
-from ..security import decode_client_token
 from ..ws_manager import manager
 
 router = APIRouter()
 
+_BASE_PROTOCOL = "pigeon.v1"
+_AUTH_PROTOCOL_PREFIX = "pigeon.auth."
+
+
+def _token_from_subprotocol(websocket: WebSocket) -> str | None:
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    for protocol in (item.strip() for item in protocols.split(",")):
+        if protocol.startswith(_AUTH_PROTOCOL_PREFIX):
+            return protocol.removeprefix(_AUTH_PROTOCOL_PREFIX)
+    return None
+
 
 async def _resolve_user(session: AsyncSession, token: str) -> User | None:
-    try:
-        payload = decode_client_token(token)
-    except jwt.InvalidTokenError:
-        return None
-    if payload.get("typ") != "client":
-        return None
-    try:
-        user_id = int(payload.get("sub") or 0)
-    except (TypeError, ValueError):
-        return None
-    user = await session.get(User, user_id)
-    if user is None or not user.is_active:
-        return None
-    return user
+    return await resolve_client_user(session, token)
 
 
 async def _backlog_payload(
@@ -76,16 +74,45 @@ async def _backlog_payload(
 
 
 @router.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket, token: str = Query(...)) -> None:
+async def ws_endpoint(websocket: WebSocket, token: str | None = Query(default=None)) -> None:
+    auth_token = token or _token_from_subprotocol(websocket)
+    requested_protocols = {
+        item.strip()
+        for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+    }
+    accepted_protocol = _BASE_PROTOCOL if _BASE_PROTOCOL in requested_protocols else None
+
+    # Browsers authenticate in the first frame so JWTs stay out of URLs and
+    # WebSocket protocol headers. Query/subprotocol auth remains compatible.
+    if auth_token is None:
+        await websocket.accept(subprotocol=accepted_protocol)
+        try:
+            payload = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+        except (TimeoutError, ValueError, WebSocketDisconnect):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if (
+            not isinstance(payload, dict)
+            or payload.get("type") != "auth"
+            or not isinstance(payload.get("token"), str)
+        ):
+            await websocket.send_json({"type": "auth_error", "reason": "auth required"})
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        auth_token = payload["token"]
+
     async with SessionLocal() as session:
-        user = await _resolve_user(session, token)
+        user = await _resolve_user(session, auth_token)
         if user is None:
+            if websocket.application_state.name == "CONNECTED":
+                await websocket.send_json({"type": "auth_error", "reason": "invalid session"})
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         user.last_seen_at = datetime.now(timezone.utc)
         await session.commit()
 
-        await websocket.accept()
+        if websocket.application_state.name != "CONNECTED":
+            await websocket.accept(subprotocol=accepted_protocol)
         await manager.connect(user.id, websocket)
 
         messages, receipts = await _backlog_payload(session, user)
@@ -122,6 +149,13 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(...)) -> None:
             # Clients may send ping frames; accept simple textual pings too.
             raw = await websocket.receive_text()
             if raw == "ping":
+                async with SessionLocal() as session:
+                    if await _resolve_user(session, auth_token) is None:
+                        await websocket.send_json(
+                            {"type": "auth_error", "reason": "invalid session"}
+                        )
+                        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                        return
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         pass

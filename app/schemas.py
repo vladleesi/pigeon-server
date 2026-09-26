@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -82,13 +82,25 @@ class SendMessageRequest(BaseModel):
     envelopes: list[MessageEnvelope] = Field(..., min_length=1)
 
 
-class SendMessageResponse(BaseModel):
+class TimestampedPayload(BaseModel):
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_utc(cls, value: datetime) -> datetime:
+        # SQLite returns naive datetimes even for timezone-aware columns.
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+class SendMessageResponse(TimestampedPayload):
     client_message_id: str
     recipients: list[str]
     created_at: datetime
 
 
-class IncomingMessage(BaseModel):
+class IncomingMessage(TimestampedPayload):
     id: int
     client_message_id: str
     chat_id: int
@@ -97,7 +109,7 @@ class IncomingMessage(BaseModel):
     created_at: datetime
 
 
-class IncomingReadReceipt(BaseModel):
+class IncomingReadReceipt(TimestampedPayload):
     id: int
     client_message_id: str
     chat_id: int
@@ -140,6 +152,7 @@ class AdminLinkOut(BaseModel):
     max_uses: int
     uses_count: int
     is_active: bool
+    revoked_at: datetime | None = None
     note: str | None
     created_at: datetime
     expires_at: datetime | None

@@ -54,10 +54,11 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def create_client_token(user_id: int, public_id: str) -> str:
+def create_client_token(user_id: int, public_id: str, link_id: int) -> str:
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "pid": public_id,
+        "lid": link_id,
         "typ": "client",
         "iat": int(_now().timestamp()),
         "exp": int(
@@ -72,7 +73,7 @@ def decode_client_token(token: str) -> dict[str, Any]:
         token,
         _settings.secret_key,
         algorithms=[JWT_ALG],
-        options={"require": ["exp", "sub", "typ"]},
+        options={"require": ["exp", "sub", "typ", "pid", "lid"]},
     )
 
 

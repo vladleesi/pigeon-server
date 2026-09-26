@@ -81,7 +81,7 @@ async def activate_link(
     public_key: bytes,
     display_name: str | None,
     current_user: User | None = None,
-) -> tuple[User, Chat]:
+) -> tuple[User, Chat, Link]:
     """Handle invite-link activation.
 
     If ``current_user`` is set, add that user to the chat/group.
@@ -157,7 +157,7 @@ async def activate_link(
     await session.commit()
     await session.refresh(user)
     await session.refresh(chat)
-    return user, chat
+    return user, chat, link
 
 
 async def get_user_chats(session: AsyncSession, user: User) -> list[Chat]:

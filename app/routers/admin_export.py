@@ -97,6 +97,7 @@ async def export_bundle(
                 "max_uses": link.max_uses,
                 "uses_count": link.uses_count,
                 "is_active": link.is_active,
+                "revoked_at": _dt_iso(link.revoked_at),
                 "note": link.note,
                 "created_at": _dt_iso(link.created_at),
                 "expires_at": _dt_iso(link.expires_at),
@@ -231,6 +232,7 @@ async def import_bundle(
             max_uses=int(raw_link.get("max_uses") or (2 if link_type is LinkType.personal else 0)),
             uses_count=int(raw_link.get("uses_count") or 0),
             is_active=bool(raw_link.get("is_active", True)),
+            revoked_at=_parse_dt(raw_link.get("revoked_at")),
             note=raw_link.get("note"),
             created_at=_parse_dt(raw_link.get("created_at"))
             or datetime.now(timezone.utc),

@@ -23,7 +23,7 @@ complexity.
 
 ## Scope notes
 
-- This repository contains the server, not an end-user encryption client.
+- The bundled browser client is a testing aid, not an audited end-user client.
 - Client applications are responsible for generating keys and encrypting message
   payloads correctly.
 - The project has not undergone an independent security audit.

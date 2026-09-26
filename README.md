@@ -6,15 +6,17 @@
 Backend for a link-only messenger. The server:
 
 - Creates and revokes **personal** (1:1) and **group** invite links.
+- Client sessions are bound to the invite that issued them; manually revoking
+  that invite invalidates its JWTs and closes connected WebSockets.
 - Accepts clients who activate those links.
 - Relays **client-encrypted** messages end-to-end — the server only sees ciphertext and metadata.
 - Does **not** keep a permanent archive: delivered and read messages are removed.
 - Provides a minimal web admin UI for monitoring and exporting/importing configuration to another host.
 
 > [!IMPORTANT]
-> This repository is the **server only**. It does not include an end-user mobile
-> or browser chat client. Invite pages must be opened by a compatible client
-> implementing the API documented below.
+> This repository is primarily the **server**. It includes a lightweight browser
+> client at `/client` for local and interoperability testing, not as an audited
+> end-user application. Production clients should implement the API below.
 
 ## Project status
 
@@ -57,6 +59,7 @@ The API listens on `http://localhost:8000`.
 
 - `http://localhost:8000/health` — liveness.
 - `http://localhost:8000/admin/login` — admin UI login.
+- `http://localhost:8000/client` — lightweight encrypted test client.
 - `http://localhost:8000/l/<token>` — informational landing page for a link (activation is in the app).
 - `http://localhost:8000/docs` — OpenAPI docs.
 
@@ -155,7 +158,31 @@ docker compose exec pigeon python -m scripts.create_admin --username alice
 
 ## Mobile client API
 
-Flow: the client receives `https://<PIGEON_PUBLIC_URL>/l/<token>`, **opens it in the app**, and calls HTTP. Activation is not intended for browsers only.
+### Bundled test web client
+
+The dependency-free client at `/client` can activate invite links and exchange
+encrypted messages with another copy of itself. It uses browser Web Crypto with
+a sender-static plus ephemeral X25519 construction, HKDF-SHA-256, and
+AES-256-GCM. Peer key fingerprints are shown for out-of-band verification. Its
+private key is stored as a
+non-exportable `CryptoKey` in IndexedDB. Local history is encrypted with a
+separate non-exportable AES-GCM key and survives page refreshes until **Reset
+device** is used. The page ships with a restrictive Content Security Policy and
+does not load third-party code.
+
+Use it on `localhost` or behind HTTPS. It is intended for testing, has not been
+independently audited, and its envelope format is not compatible with NaCl
+`crypto_box` clients without an interoperability layer.
+
+To test a personal chat, create an invite in the admin UI, then open its landing
+page once in a normal browser window and once in a private window. Activate each
+side with a different display name, compare the full peer fingerprints out of
+band, and send a message. Use **Reset device** when finished; resetting destroys
+the local private key and makes that browser identity unrecoverable.
+
+Flow: the client receives `https://<PIGEON_PUBLIC_URL>/l/<token>`, opens it in a
+compatible client, and calls HTTP. The invite landing page links to the bundled
+test client.
 
 ### Activate link
 
@@ -227,6 +254,10 @@ Rules:
    ```
 
    The `hello` frame includes backlog (offline messages and receipts); then `message` and `read` events stream live.
+   Browser clients can avoid putting the JWT in the URL by requesting the
+   `pigeon.v1` WebSocket subprotocol and immediately sending
+   `{"type":"auth","token":"<JWT>"}` as the first frame. Query and legacy
+   authentication-subprotocol clients remain supported.
 
 2. **Polling fallback**:
 
@@ -278,7 +309,11 @@ Deletes pending ciphertext your user sent that recipients have not read yet.
 | Retention | Permanent archive | Server deletes after ACK; TTL purge for stale pending (default 30 days) |
 | Session | Lost device | Short-lived JWT; PIN protects the app per product spec |
 
-Client contract: `X25519 + crypto_box` (NaCl/libsodium). User public key is 32 bytes base64; ciphertext includes nonce+MAC, base64-encoded.
+The server contract requires a 32-byte base64 X25519 public key and treats each
+ciphertext envelope as opaque base64 data. Production clients must agree on an
+authenticated envelope format. The bundled test client uses
+`X25519-2DH + HKDF-SHA-256 + AES-256-GCM`; NaCl/libsodium clients may instead use
+`crypto_box` when all participants use that format.
 
 ---
 
@@ -351,11 +386,14 @@ app/
     me.py              /api/v1/me
     chats.py           messaging, poll, ack
     ws.py              /ws
+    client.py          /client test UI
     admin_auth.py      admin login/logout
     admin_ui.py        /admin HTML
     admin_export.py    /admin/api/export|import
   templates/           HTML
-  static/admin.css
+  static/admin.css     admin styles
+  static/client.css    test client styles
+  static/client.js     browser crypto + client behavior
 
 scripts/
   create_admin.py
