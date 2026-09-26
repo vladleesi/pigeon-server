@@ -175,6 +175,7 @@ table.data th, table.data td {
 }
 
 table.data th { color: var(--muted); font-weight: 500; }
+table.data .date-cell { white-space: nowrap; }
 table.data th, table.data td { border: 0; }
 table.data tbody tr + tr > td { border-top: 1px solid var(--border); }
 .table-scroll { overflow-x: auto; }

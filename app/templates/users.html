@@ -33,7 +33,7 @@
             {% for cid in u.chats %}<span class="pill">#{{ cid }}</span>{% endfor %}
           {% else %}-{% endif %}
         </td>
-        <td>{{ u.created_at|fmt_dt }}</td>
+        <td class="date-cell">{{ u.created_at|fmt_dt }}</td>
         <td>{{ u.last_seen_at|fmt_dt }}</td>
         <td>
           {% if u.is_active %}<span class="badge ok">active</span>

@@ -34,7 +34,7 @@
           {% for pid in c.members %}<span class="pill mono">{{ pid }}</span>{% endfor %}
         </td>
         <td>{{ c.pending }}</td>
-        <td>{{ c.created_at|fmt_dt }}</td>
+        <td class="date-cell">{{ c.created_at|fmt_dt }}</td>
         <td>
           <div class="row-actions">
           <form method="post" action="/admin/chats/{{ c.id }}/purge"

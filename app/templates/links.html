@@ -85,8 +85,8 @@
           {% elif link.is_active %}<span class="badge ok">active</span>
           {% else %}<span class="badge">inactive</span>{% endif %}
         </td>
-        <td>{{ link.created_at|fmt_dt }}</td>
-        <td>{{ link.expires_at|fmt_dt }}</td>
+        <td class="date-cell">{{ link.created_at|fmt_dt }}</td>
+        <td class="date-cell">{{ link.expires_at|fmt_dt }}</td>
         <td>{{ link.note or "-" }}</td>
         <td>
           <div class="row-actions">
