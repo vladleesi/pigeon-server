@@ -75,6 +75,17 @@ deliveries. Clients must still deduplicate local history and acknowledge restore
 rows after confirming persistence. Delivery IDs expire or are deleted with their message/receipt rows. The bounded
 send ledger introduced below survives those deletions until its retry deadline.
 
+## 0.3.1 admin login hardening
+
+Update the server using your normal controlled deployment procedure. No database
+schema, client, or encryption protocol migration is required; valid admin sessions
+keep working. Password resets reject in-flight logins verified against the old
+password and continue to revoke sessions issued before the reset commits.
+An affected login returns the normal invalid-credentials error; sign in with the
+new password. Session issuance now enforces the global 1,000-session cap across
+workers and removes expired admin sessions without waiting for hourly cleanup.
+Rolling back server code restores the login/reset race and non-atomic cap.
+
 ## 0.3.0 delivery/session hardening rollout
 
 1. Stop all backend writers and make a private, consistent database backup.

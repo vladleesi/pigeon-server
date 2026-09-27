@@ -148,6 +148,25 @@ concurrency/frame sizes. SQL exception logging hides query parameters. Upstream
 logging, HSTS, backup encryption/access, and host/container resource limits remain
 operator responsibilities; no production environment was modified in this pass.
 
+## Follow-up: admin login/reset serialization (0.3.1)
+
+Source review found that login verified a password before creating a session in
+a separate write operation. A password reset could commit between those steps,
+allowing an in-flight login to create a session after revocation. Login now releases
+its read transaction before password verification, then takes a SQLite write
+reservation, rereads the admin record, and requires the same username and password
+hash before creating a session. Password verification stays off the event loop
+and outside the write reservation. Resets committed first invalidate that login;
+resets committed after issuance delete its session. Already authorized requests
+are not cancelled by a later reset.
+
+The same transaction removes expired admin sessions and checks the global
+1,000-session cap before insertion. Concurrent workers cannot overfill the cap;
+live sessions are never evicted to make room. No schema or client migration is
+needed. Regression coverage includes reset during password verification, reset
+after issuance, concurrent logins competing for the final slot, and expired
+session reclamation, all against an isolated test database.
+
 ## Local history, metadata, and deployment
 
 Local history stays encrypted under a separate AES key, with storage location
@@ -243,6 +262,13 @@ JavaScript port solely because it runs in the current browser client.
    reuse message keys. Old messages gain no retroactive forward secrecy.
 
 ## Verification and limits
+
+The 0.3.1 admin login follow-up passed **94 Python tests and 38 JavaScript tests**,
+including the four new isolated-database regressions. Ruff, compilation, client/form
+syntax, documentation links, landing assets/structured data, whitespace and privacy
+exclusions passed. Existing metadata/social preview verification remains applicable;
+their claims are unchanged. The existing Starlette/AnyIO deprecation warning remains.
+No browser checks, deployment, service restart, or live database changes were made.
 
 Release 0.3.0 preparation reviewed authentication, refresh replay handling, CSRF,
 delivery retry/retention, quotas, and changed client persistence paths. Malformed

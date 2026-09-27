@@ -69,9 +69,16 @@ async def login_submit(
         return templates.TemplateResponse(request, "login.html",
             {"error": "Too many attempts. Try again in a minute."}, status_code=429,
             headers={"Retry-After": "60"})
-    result = await session.execute(select(Admin).where(Admin.username == username))
-    admin = result.scalar_one_or_none()
-    if admin is None or not await run_in_threadpool(verify_password, password, admin.password_hash):
+    result = await session.execute(
+        select(Admin.id, Admin.password_hash).where(Admin.username == username)
+    )
+    candidate = result.one_or_none()
+    # Release the read transaction before the slow KDF. A password reset must
+    # be able to finish while verification is in flight.
+    await session.rollback()
+    if candidate is None or not await run_in_threadpool(
+        verify_password, password, candidate.password_hash,
+    ):
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -79,10 +86,21 @@ async def login_submit(
             status_code=401,
         )
 
+    # Serialize the final credential check and session issuance with password
+    # resets and other logins. Never issue from the pre-verification snapshot.
+    await session.execute(text("BEGIN IMMEDIATE"))
+    admin = await session.get(Admin, candidate.id)
+    if (admin is None or admin.username != username
+            or admin.password_hash != candidate.password_hash):
+        return templates.TemplateResponse(
+            request, "login.html", {"error": "Invalid username or password."}, status_code=401,
+        )
+    now = datetime.now(timezone.utc)
+    await session.execute(delete(AdminSession).where(AdminSession.expires_at <= now))
     if (await session.scalar(select(func.count(AdminSession.id)))) >= 1000:
         return templates.TemplateResponse(request, "login.html",
             {"error": "Session capacity reached. Try again later."}, status_code=429)
-    admin.last_login_at = datetime.now(timezone.utc)
+    admin.last_login_at = now
     sid = secrets.token_hex(16)
     session.add(AdminSession(id=sid, admin_id=admin.id,
                             expires_at=now + timedelta(

@@ -107,7 +107,7 @@ below uses the `SIDEWORD_` prefix, for example `SIDEWORD_MESSAGE_TTL_DAYS=30`.
 
 Additional limits, trusted proxy configuration, backup controls and migration gates
 are documented in [.env.example](.env.example) and the
-[security rollout guide](docs/UPGRADING.md#deliverysession-hardening-rollout).
+[security rollout guide](docs/UPGRADING.md#030-deliverysession-hardening-rollout).
 
 
 Bootstrap credentials can be removed from `.env` after the admin account exists.
@@ -118,6 +118,8 @@ python -m scripts.create_admin --username admin
 ```
 
 For Docker, prefix it with `docker compose exec sideword`.
+Password resets revoke existing admin sessions and reject in-flight logins that
+verified the previous password. Sign in again after a reset.
 
 ## Public access
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 — 2026-09-27
+
+- Reject admin logins verified against a password changed by a concurrent reset, preserving session revocation.
+- Enforce the admin session cap atomically across concurrent logins and reclaim expired sessions during login.
+
 ## 0.3.0 — 2026-09-27
 
 - Reject malformed non-ASCII CSRF tokens without a server error and accept validated same-origin no-referrer login forms.

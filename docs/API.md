@@ -318,5 +318,10 @@ a valid CSRF token. Clients lacking Origin and Fetch Metadata require the CSRF
 header. Explicit foreign origins are always rejected.
 Cookie-free admin API bearer clients are exempt from CSRF, but their JWT must
 reference a live admin session. Logout and CLI password resets revoke sessions.
+Session creation rechecks the verified password record inside a SQLite write
+transaction, so a concurrent reset cannot be bypassed by an in-flight login.
+Logins return 401 if that record changed. The global 1,000-session cap is enforced
+in the same transaction; expired admin sessions are removed before checking it.
+At capacity, login returns 429 without evicting any live session.
 Old stateless admin JWTs require login again. Administrator/schema endpoints
 are local-only by default; HTTPS is required outside loopback for all APIs.
