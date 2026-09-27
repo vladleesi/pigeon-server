@@ -1,9 +1,5 @@
 # Changelog
 
-## 0.3.1 — 2026-09-27
-
-- Remove the empty Unreleased section and standardize changelog bullet formatting.
-
 ## 0.3.0 — 2026-09-27
 
 - Reject malformed non-ASCII CSRF tokens without a server error and accept validated same-origin no-referrer login forms.
