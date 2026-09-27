@@ -2,7 +2,7 @@
 
 import re
 
-from fastapi.testclient import TestClient
+from csrf_client import TestClient
 
 from app.main import create_app
 from app.version import __version__

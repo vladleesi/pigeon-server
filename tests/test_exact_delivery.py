@@ -7,7 +7,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fastapi.testclient import TestClient
+from csrf_client import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -87,7 +87,7 @@ def test_delayed_read_and_ack_cannot_consume_reused_row_or_logical_id(room):
     send(client, users)
     old = poll(client, users[1])["messages"][0]
     assert read(client, users[1], reference(old)).json() == {"marked": 1}
-    send(client, users)  # Even the same sender/client message ID gets a new delivery.
+    send(client, users, message_id="next-message")  # New logical delivery reuses the row ID.
     new = poll(client, users[1])["messages"][0]
     assert old["id"] == new["id"]
     assert old["delivery_id"] != new["delivery_id"]
@@ -109,7 +109,7 @@ def test_delayed_receipt_ack_does_not_delete_reused_receipt_id(room):
     body = {"receipts": [reference(old, receipt=True)]}
     assert client.post("/api/v1/ack/exact", headers=headers(users[0]),
                        json=body).json()["deleted_receipts"] == 1
-    send(client, users)
+    send(client, users, message_id="next-message")
     read(client, users[1], reference(poll(client, users[1])["messages"][0]))
     new = poll(client, users[0])["read_receipts"][0]
     assert old["id"] == new["id"]

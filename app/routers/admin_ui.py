@@ -21,10 +21,13 @@ from ..models import (
     Chat,
     ChatMember,
     ChatType,
+    ClientSession,
     Link,
     LinkType,
     PendingMessage,
     ReadReceipt,
+    RefreshUse,
+    SendRecord,
     User,
 )
 from ..security import generate_link_token, public_key_fingerprint
@@ -351,6 +354,10 @@ async def _delete_users(session: AsyncSession, users: list[User]) -> None:
         ReadReceipt.sender_id.in_(ids), ReadReceipt.reader_public_id.in_(pids),
     )))
     await session.execute(delete(ChatMember).where(ChatMember.user_id.in_(ids)))
+    await session.execute(delete(SendRecord).where(SendRecord.sender_id.in_(ids)))
+    await session.execute(delete(RefreshUse).where(RefreshUse.session_id.in_(
+        select(ClientSession.id).where(ClientSession.user_id.in_(ids)))))
+    await session.execute(delete(ClientSession).where(ClientSession.user_id.in_(ids)))
     await session.execute(delete(User).where(User.id.in_(ids)))
     await session.commit()
     await ws_manager.revoke(ids)
@@ -398,6 +405,7 @@ async def _delete_chats(session: AsyncSession, chat_ids: set[int]) -> None:
     await session.execute(delete(PendingMessage).where(PendingMessage.chat_id.in_(chat_ids)))
     await session.execute(delete(ReadReceipt).where(ReadReceipt.chat_id.in_(chat_ids)))
     await session.execute(delete(ChatMember).where(ChatMember.chat_id.in_(chat_ids)))
+    await session.execute(delete(SendRecord).where(SendRecord.chat_id.in_(chat_ids)))
     await session.execute(delete(Chat).where(Chat.id.in_(chat_ids)))
     await session.commit()
     await ws_manager.revoke(users)

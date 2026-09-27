@@ -8,11 +8,19 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from .config import get_settings
 from .db import session_scope
-from .models import PendingMessage, ReadReceipt
+from .models import (
+    AdminSession,
+    ClientSession,
+    LoginLimit,
+    PendingMessage,
+    ReadReceipt,
+    RefreshUse,
+    SendRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +38,12 @@ async def _purge_once() -> None:
         rcpt_res = await session.execute(
             delete(ReadReceipt).where(ReadReceipt.created_at < cutoff)
         )
+        now = datetime.now(timezone.utc)
+        await session.execute(delete(SendRecord).where(SendRecord.expires_at <= now))
+        await session.execute(delete(RefreshUse).where(RefreshUse.session_id.in_(
+            select(ClientSession.id).where(ClientSession.expires_at <= now))))
+        for model in (ClientSession, AdminSession, LoginLimit):
+            await session.execute(delete(model).where(model.expires_at <= now))
         await session.commit()
         if msg_res.rowcount or rcpt_res.rowcount:
             logger.info(

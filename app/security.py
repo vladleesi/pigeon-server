@@ -54,7 +54,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def create_client_token(user_id: int, public_id: str, link_id: int) -> str:
+def create_client_token(
+    user_id: int, public_id: str, link_id: int, session_id: str | None = None,
+) -> str:
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "pid": public_id,
@@ -65,6 +67,10 @@ def create_client_token(user_id: int, public_id: str, link_id: int) -> str:
             (_now() + timedelta(hours=_settings.jwt_ttl_hours)).timestamp()
         ),
     }
+    if session_id is not None:
+        payload["sid"] = session_id
+        payload["exp"] = int((_now() + timedelta(
+            minutes=_settings.client_access_minutes)).timestamp())
     return jwt.encode(payload, _settings.secret_key, algorithm=JWT_ALG)
 
 
@@ -77,10 +83,11 @@ def decode_client_token(token: str) -> dict[str, Any]:
     )
 
 
-def create_admin_token(admin_id: int, username: str) -> str:
+def create_admin_token(admin_id: int, username: str, session_id: str) -> str:
     payload: dict[str, Any] = {
         "sub": str(admin_id),
         "usr": username,
+        "sid": session_id,
         "typ": "admin",
         "iat": int(_now().timestamp()),
         "exp": int(

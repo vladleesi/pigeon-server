@@ -25,6 +25,7 @@ _settings = get_settings()
 engine = create_async_engine(
     _settings.db_url,
     echo=False,
+    hide_parameters=True,
     future=True,
     pool_pre_ping=True,
     connect_args={"timeout": 30},

@@ -47,12 +47,16 @@ async def _run() -> None:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             # ---------- Admin login ----------
+            await c.get("/admin/login")
+            c.headers["X-CSRF-Token"] = c.cookies.get("sideword_csrf")
             r = await c.post(
                 "/admin/login",
                 data={"username": "admin", "password": "adminpass"},
                 follow_redirects=False,
             )
-            assert r.status_code == 303, r.text
+            assert r.status_code == 303
+            await c.get("/admin/login")
+            c.headers["X-CSRF-Token"] = c.cookies.get("sideword_csrf")
             cookie = r.cookies.get("sideword_admin_session")
             assert cookie, "admin cookie missing"
             c.cookies.set("sideword_admin_session", cookie)

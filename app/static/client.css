@@ -146,8 +146,11 @@ textarea { resize: vertical; min-height: 48px; max-height: 180px; }
 }
 .chat-button:hover, .chat-button.active { background: var(--surface-alt); border-color: var(--border); }
 .chat-button span { color: var(--muted); font-size: 0.78rem; }
-.conversation { min-width: 0; display: grid; grid-template-rows: auto 1fr auto; }
-.message-list { min-height: 430px; max-height: 560px; padding: 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+.conversation { min-width: 0; align-self: start; display: grid; grid-template-rows: auto auto auto; }
+.message-list { height: clamp(360px, 55svh, 560px); min-height: 0; padding: 1.25rem; overflow-y: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 0.75rem; }
+.message-list > * { flex-shrink: 0; }
+#pending-sends { padding: 1rem; overflow-wrap: anywhere; }
+#pending-send-list { max-height: 180px; overflow-y: auto; }
 .empty-state { margin: auto; color: var(--muted); text-align: center; }
 .message { max-width: min(76%, 620px); padding: 0.72rem 0.85rem; border-radius: 12px; background: var(--theirs); overflow-wrap: anywhere; }
 .message.mine { align-self: flex-end; background: var(--mine); }
@@ -171,7 +174,6 @@ textarea { resize: vertical; min-height: 48px; max-height: 180px; }
   .chat-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
   .chat-list { display: flex; overflow-x: auto; }
   .chat-button { min-width: 190px; }
-  .message-list { min-height: 360px; }
 }
 @media (max-width: 500px) {
   .client-header { display: block; }

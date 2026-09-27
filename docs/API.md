@@ -214,9 +214,9 @@ Legacy `POST /api/v1/ack` with `message_ids`/`read_ids` and
 `POST /api/v1/chats/{chat_id}/read` with `client_message_ids` remain supported.
 They retain their ambiguous matching: delayed ACKs can target reused row IDs,
 and legacy reads can match different group senders sharing a client message ID.
-The exact endpoints prevent these deletion mistakes; they do not make sends
-idempotent. Duplicate uploads still create distinct deliveries. Use a fresh
-client message ID for each logical message. Stolen bearer tokens can still
+Set `SIDEWORD_ALLOW_LEGACY_ACK=false` after migrating clients to return 410
+from legacy deletion endpoints. Sends now deduplicate within the retry window
+described below. Use a fresh client message ID for each logical message. Stolen bearer tokens can still
 delete their owner's deliveries through either API.
 
 ## Drop own undelivered messages
@@ -248,3 +248,75 @@ anchor. Neither protocol v1 nor `crypto_box` provides a session ratchet. A serve
 that substitutes keys before first use or serves malicious client code remains
 outside the protection of local pinning. Default JWT lifetimes are unchanged;
 the [review](SECURITY_REVIEW.md) describes renewal and migration requirements.
+
+## Send retries and capacity
+
+`POST /chats/{chat_id}/messages` is idempotent by chat, authenticated sender, and
+`client_message_id` for `SEND_IDEMPOTENCY_DAYS` (default 30). Identical decoded
+ciphertext and recipient sets return the original 200 response; conflicting
+payloads return 409. An identical retry after read/ACK or partial fanout delivery
+does not recreate deleted rows. Recipient order and equivalent base64 encoding
+do not change the comparison. IDs must be unique for each logical message.
+The guarantee begins with the first successful upload after this upgrade.
+
+`/me.send_retry_window_seconds` advertises the current window. Persist envelopes
+before uploading; never re-encrypt a retry under the same ID. A shorter later
+configuration must not be assumed to extend old records. Beyond the saved window,
+verify delivery manually. The browser retains expired retries for review/discard.
+Server outbox deletion also preserves retry evidence. A complete database backup
+preserves the ledger; configuration exports do not. Restoring an older backup can
+lose evidence of later sends and replay later refresh credentials.
+
+Requests are limited to 2 MiB by default, envelopes to 100 per send, and poll/WS
+backlog to 100 messages plus 100 receipts. Poll and consume batches until empty.
+A sender may have 1,000 outstanding envelopes/receipts and 16 MiB queued
+ciphertext, with at most 60 new sends/minute; identical retries consume no new
+capacity. Global queue, byte, receipt, participant and ledger quotas return 429 without
+partial fanout or eviction. Default request rate is 600/minute/IP/process;
+WS supports 256 connections/process, 4/user/process, 4 KiB inbound frames and
+120 inbound frames/minute/socket. Proxy limits must complement these counters.
+
+## Renewable client sessions
+
+On activation, optionally include `session_credential`: 32 random bytes encoded
+as 43 unpadded base64url characters, persisted before the request. The response
+adds `session_id`, `access_expires_at`, and `session_expires_at`. Identical initial
+credentials can retry a lost activation response before their first rotation.
+The browser opts in. A valid legacy JWT can instead POST `/api/v1/sessions` with
+`{"credential":"<persisted-random-secret>"}` to migrate; registered sessions
+cannot use that endpoint to extend their absolute lifetime.
+
+POST `/api/v1/sessions/refresh` without an access token, over HTTPS, with
+`{"credential":"<current-secret>","next_credential":"<fresh-persisted-secret>"}`.
+Persist the proposed successor before sending. Save the returned token and promote
+the successor together; coordinate tabs/processes so they propose the same retry.
+The server stores only digests. The exact pair can retry for 30 seconds while
+its successor is current. Any other reuse of a known consumed credential revokes
+the session. Never replace a pending proposal merely because a response was lost.
+Access defaults to 15 minutes; the absolute session lifetime defaults to 30 days
+and never extends on refresh. Refresh after that deadline requires invite recovery.
+
+GET `/api/v1/sessions` lists the authenticated user's sessions; DELETE
+`/api/v1/sessions/{session_id}` revokes one. Revocation affects HTTP and WS session
+checks. `/me` reports `access_expires_at` and `session_expires_at`, each capped by
+invite expiry. Consumed/sealed invites still permit valid session refresh;
+revoked, deleted, expired invites and inactive users do not.
+
+An optional UTC `LEGACY_TOKEN_DEADLINE` rejects old JWTs and activation without a
+session credential after that date. Until then, legacy JWTs still authorize
+operations independently of per-device session revocation. Invite resume secrets
+also remain separate: revoke the invite if those credentials are compromised.
+
+## Admin requests
+
+Fetch an admin page before submitting a form. HTML forms include `csrf_token`;
+programmatic cookie clients send the rendered token as `X-CSRF-Token`. Tokens are
+bound to the current admin cookie. Refresh the token after login. Cross-origin
+unsafe requests are rejected. A missing or null Origin from a `no-referrer` form
+is accepted only with browser Fetch Metadata `Sec-Fetch-Site: same-origin` and
+a valid CSRF token. Clients lacking Origin and Fetch Metadata require the CSRF
+header. Explicit foreign origins are always rejected.
+Cookie-free admin API bearer clients are exempt from CSRF, but their JWT must
+reference a live admin session. Logout and CLI password resets revoke sessions.
+Old stateless admin JWTs require login again. Administrator/schema endpoints
+are local-only by default; HTTPS is required outside loopback for all APIs.

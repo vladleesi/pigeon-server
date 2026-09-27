@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Sideword test client</title>
-  <link rel="stylesheet" href="/static/client.css?v=5">
+  <link rel="stylesheet" href="/static/client.css?v=6">
   <script src="/static/client-protocol.js?v=1" defer></script>
-  <script src="/static/client.js?v=10" defer></script>
+  <script src="/static/client.js?v=13" defer></script>
 </head>
 <body>
   <header class="client-header">
@@ -72,6 +72,11 @@
           <button id="refresh-button" class="button subtle" type="button">Refresh</button>
         </div>
         <div id="chat-list" class="chat-list" role="list"></div>
+        <section id="pending-sends" hidden aria-labelledby="pending-sends-title">
+          <h3 id="pending-sends-title">Pending sends</h3>
+          <ul id="pending-send-list"></ul>
+          <button id="retry-pending-sends" class="button" type="button">Retry pending sends</button>
+        </section>
       </aside>
 
       <section class="conversation" aria-labelledby="conversation-title">
@@ -88,6 +93,7 @@
         <div id="message-list" class="message-list" role="log" aria-live="polite">
           <p class="empty-state">Choose a conversation to view messages.</p>
         </div>
+
 
         <form id="message-form" class="composer">
           <label class="sr-only" for="message-input">Message</label>

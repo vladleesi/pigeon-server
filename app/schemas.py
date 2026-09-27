@@ -32,6 +32,7 @@ class LinkActivateRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=64)
     password: SecretStr | None = None
     resume_credential: SecretStr | None = None
+    session_credential: SecretStr | None = None
 
     @field_validator("public_key")
     @classmethod
@@ -59,6 +60,9 @@ class ChatInfo(BaseModel):
 
 class LinkActivateResponse(BaseModel):
     token: str = Field(..., description="Client JWT; send as Authorization: Bearer.")
+    session_id: str | None = None
+    access_expires_at: datetime | None = None
+    session_expires_at: datetime | None = None
     user: ParticipantInfo
     chat: ChatInfo
 
@@ -68,6 +72,8 @@ class MeResponse(BaseModel):
     chats: list[ChatInfo]
     access_expires_at: datetime | None = None
     server_time: datetime | None = None
+    send_retry_window_seconds: int = 0
+    session_expires_at: datetime | None = None
 
 
 class MessageEnvelope(BaseModel):
@@ -83,7 +89,7 @@ class MessageEnvelope(BaseModel):
 
 class SendMessageRequest(BaseModel):
     client_message_id: str = Field(..., min_length=1, max_length=64)
-    envelopes: list[MessageEnvelope] = Field(..., min_length=1)
+    envelopes: list[MessageEnvelope] = Field(..., min_length=1, max_length=100)
 
 
 class TimestampedPayload(BaseModel):
@@ -129,8 +135,8 @@ class PollResponse(BaseModel):
 
 
 class AckRequest(BaseModel):
-    message_ids: list[int] = Field(default_factory=list)
-    read_ids: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list, max_length=500)
+    read_ids: list[int] = Field(default_factory=list, max_length=500)
 
 
 class MarkReadRequest(BaseModel):

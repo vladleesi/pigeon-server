@@ -20,6 +20,7 @@
       <a href="/client">Test client</a>
     </nav>
     <form method="post" action="/admin/logout" class="logout">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <span class="hello">{{ admin.username }}</span>
       <button type="submit">Sign out</button>
     </form>

@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .admin_setup import ensure_default_admin
 from .cleanup import run_periodic_cleanup
 from .db import init_db
+from .guards import SecurityGuards
 from .routers import (
     admin_auth,
     admin_export,
@@ -25,6 +26,7 @@ from .routers import (
     landing,
     links,
     me,
+    sessions,
     ws,
 )
 from .version import __version__
@@ -82,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(landing.router)
     app.include_router(links.router)
     app.include_router(me.router)
+    app.include_router(sessions.router)
     app.include_router(chats.router)
     app.include_router(ws.router)
     app.include_router(client.router)
@@ -89,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_ui.router)
     app.include_router(admin_export.router)
 
+    app.add_middleware(SecurityGuards)
     return app
 
 

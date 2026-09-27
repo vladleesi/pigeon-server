@@ -44,6 +44,18 @@ function client(backend) {
   return run;
 }
 
+test('routine identity saves cannot overwrite a concurrent credential rotation', async () => {
+  const backend = storage();
+  backend.records.set('identity', { publicId: 'me', token: 'fresh-access',
+    refreshCredential: 'fresh-refresh', pendingRefreshCredential: 'durable-proposal' });
+  const run = client(backend);
+  await run(`writeIdentity({ publicId: 'me', token: 'stale-access',
+    refreshCredential: 'stale-refresh', displayName: 'Updated' })`);
+  assert.equal(backend.records.get('identity').token, 'fresh-access');
+  assert.equal(backend.records.get('identity').pendingRefreshCredential, 'durable-proposal');
+  assert.equal(backend.records.get('identity').displayName, 'Updated');
+});
+
 test('fingerprints are local; first-use pins survive reload and never silently change', async () => {
   const backend = storage();
   const run = client(backend);

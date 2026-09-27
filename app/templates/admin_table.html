@@ -2,6 +2,7 @@
 <div class="table-toolbar">
 {% if cleanup_label %}
 <form method="post" action="/admin/{{ resource }}/cleanup" data-confirm="{{ cleanup_confirm }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
   <input type="hidden" name="confirm" value="delete">
   <button class="danger" type="submit">{{ cleanup_label }}</button>
 </form>
@@ -9,6 +10,7 @@
 <form id="selection-{{ resource }}" class="selection-toolbar" method="post"
       action="/admin/{{ resource }}/delete-selected" data-selection-form
       data-confirm="{{ description }}" data-confirm-label="Delete selected">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
   <input type="hidden" name="confirm" value="delete">
   <span class="muted small" data-selection-count aria-live="polite">0 selected</span>
   <button class="danger" type="submit" disabled>Delete selected</button>

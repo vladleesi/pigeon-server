@@ -72,6 +72,60 @@ state and the new delivery protections.
 Full database backups preserve delivery IDs; configuration exports omit queued
 messages and receipts. A restored backup can contain previously acknowledged
 deliveries. Clients must still deduplicate local history and acknowledge restored
-rows after confirming persistence. This change adds no permanent delivery ledger
-and does not prevent duplicate sends. Delivery IDs expire or are deleted with
-their message/receipt rows.
+rows after confirming persistence. Delivery IDs expire or are deleted with their message/receipt rows. The bounded
+send ledger introduced below survives those deletions until its retry deadline.
+
+## 0.3.0 delivery/session hardening rollout
+
+1. Stop all backend writers and make a private, consistent database backup.
+2. Deploy the new server and browser together. Startup adds retry, session,
+   rotation-evidence, and login-limit tables. Existing ciphertext/history stays
+   readable. No ratchet or v1 ciphertext migration is involved.
+3. Admins must log in again: pre-registry admin JWTs are rejected. Admin form/API
+   cookie clients must fetch and submit CSRF tokens. Password resets revoke
+   existing admin sessions. All administrative/schema routes are local-only by
+   default; use the local listener or an SSH-forwarded loopback endpoint.
+4. Migrate clients to renewable sessions and exact ACK/read. Verify saved refresh
+   proposals, offline recovery, duplicate sends and concurrent tabs in your
+   release QA. The browser requires Web Locks; it fails closed without them.
+5. After every client has migrated, set `SIDEWORD_ALLOW_LEGACY_ACK=false` and a
+   fixed UTC `SIDEWORD_LEGACY_TOKEN_DEADLINE`. Leaving compatibility enabled leaves
+   the legacy risks open. Do not silently shorten the retry window for queued
+   outboxes; clients have already persisted their original retry deadlines.
+
+Default retry metadata retention is 30 days even if ciphertext was read earlier.
+Admin sessions expire after 12 hours; client sessions after 30 days; refresh-use
+hashes remain until session expiry. Login-limit records expire after one minute.
+Hourly cleanup removes expired records; startup also schedules cleanup. Users,
+room metadata and invite resume credentials keep their existing lifecycle. There
+is no automatic destructive metadata purge. Full backups include these records;
+configuration exports omit the retry/session ledger and cannot replace backups.
+
+Keep database/configuration backups encrypted with host-controlled keys, restrict
+file/volume access to the service/operator, and enforce a separate backup deletion
+schedule. Logical SQL deletion does not erase old snapshots, WAL or free pages.
+Treat restoring an old database as rolling authentication state back: before
+reopening it, rotate the signing secret and remove `refresh_uses`, `client_sessions`
+and `admin_sessions` while offline. Clients must recover through their saved
+invite credentials. Later send deduplication evidence absent from the backup is
+unrecoverable; do not blindly replay outboxes across a restoration. Rollback to
+older server code requires the matching pre-upgrade backup/client and loses the
+new protections and intervening state. Test this operational procedure separately.
+
+HTTPS/WSS is required outside loopback. The application does not trust arbitrary
+forwarded headers; the shared runner uses `SIDEWORD_TRUSTED_PROXY_IPS` (explicit
+IP list), and standalone Uvicorn/Docker uses `FORWARDED_ALLOW_IPS` in its process
+environment. Never set either to `*`. Container-to-proxy addresses may differ
+from localhost; configure the actual trusted peer before exposing the service.
+Set HSTS at the TLS terminator after validation. Continue blocking admin/schema
+paths at the proxy and on the shared listener even with application checks.
+
+The defaults in `.env.example` bound request bytes, request rate, pending message
+count/bytes, receipts, retry records, users and WS connections. HTTP bodies have a
+15-second read deadline. Admission KDFs are serialized by SQLite; login attempts
+are persisted per hashed account/IP plus a global window. IP/connection/frame
+limits are per process and reset on restart. Add gateway/global rate, connection,
+header and idle-time limits, plus container memory/CPU/disk limits. Keep request,
+credential, query-string and body logging disabled/redacted at every proxy.
+The shared runner and Docker suppress raw access/WS INFO logs; SQL exceptions
+hide parameter values. Existing upstream logs are not automatically erased.

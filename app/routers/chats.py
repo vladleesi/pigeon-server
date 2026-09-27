@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -16,6 +18,7 @@ from ..models import (
     ChatType,
     PendingMessage,
     ReadReceipt,
+    SendRecord,
     User,
 )
 from ..schemas import (
@@ -57,7 +60,33 @@ async def send_message(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SendMessageResponse:
+    await session.execute(text("BEGIN IMMEDIATE"))
     chat = await ensure_chat_member(session, chat_id, user)
+    now = datetime.now(timezone.utc)
+    digest = hashlib.sha256(json.dumps(sorted(
+        (env.recipient_public_id, hashlib.sha256(_decode_b64(env.ciphertext)).hexdigest())
+        for env in payload.envelopes
+    ), separators=(",", ":")).encode()).hexdigest()
+    record = await session.scalar(select(SendRecord).where(
+        SendRecord.chat_id == chat_id, SendRecord.sender_id == user.id,
+        SendRecord.client_message_id == payload.client_message_id,
+    ))
+    if record and record.expires_at.replace(tzinfo=timezone.utc) > now:
+        if record.payload_hash != digest:
+            raise HTTPException(409, "message identity already has a different payload")
+        return SendMessageResponse(client_message_id=payload.client_message_id,
+                                   recipients=json.loads(record.recipients_json),
+                                   created_at=record.created_at)
+    if record:
+        await session.delete(record)
+        await session.flush()
+    else:
+        legacy = await session.scalar(select(PendingMessage.id).where(
+            PendingMessage.chat_id == chat_id, PendingMessage.sender_id == user.id,
+            PendingMessage.client_message_id == payload.client_message_id,
+        ).limit(1))
+        if legacy is not None:
+            raise HTTPException(409, "message predates retry ledger; verify delivery")
     members = await chat_members(session, chat_id)
     by_pid = {m.public_id: m for m in members}
 
@@ -107,7 +136,33 @@ async def send_message(
             },
         )
 
-    now = datetime.now(timezone.utc)
+    count, size = (await session.execute(select(
+        func.count(PendingMessage.id),
+        func.coalesce(func.sum(func.length(PendingMessage.ciphertext)), 0)
+    ))).one()
+    ledger_count = await session.scalar(select(func.count(SendRecord.id)))
+    own_count, own_bytes = (await session.execute(select(
+        func.count(PendingMessage.id),
+        func.coalesce(func.sum(func.length(PendingMessage.ciphertext)), 0),
+    ).where(PendingMessage.sender_id == user.id))).one()
+    own_receipts = await session.scalar(select(func.count(ReadReceipt.id)).where(
+        ReadReceipt.sender_id == user.id))
+    recent = await session.scalar(select(func.count(SendRecord.id)).where(
+        SendRecord.sender_id == user.id, SendRecord.created_at > now - timedelta(minutes=1)))
+    if (count + len(recipients_users) > _settings.max_pending_messages
+            or size + sum(map(len, ciphertexts.values())) > _settings.max_pending_bytes
+            or ledger_count >= _settings.max_send_records
+            or own_count + own_receipts + len(recipients_users) > _settings.max_pending_per_sender
+            or (own_bytes + sum(map(len, ciphertexts.values()))
+                > _settings.max_pending_bytes_per_sender)
+            or recent >= _settings.sends_per_minute):
+        raise HTTPException(429, "relay capacity reached; retry later",
+                            headers={"Retry-After": "60"})
+    session.add(SendRecord(
+        chat_id=chat_id, sender_id=user.id, client_message_id=payload.client_message_id,
+        payload_hash=digest, recipients_json=json.dumps([r.public_id for r in recipients_users]),
+        created_at=now, expires_at=now + timedelta(days=_settings.send_idempotency_days),
+    ))
     new_rows = [
         PendingMessage(
             client_message_id=payload.client_message_id,
@@ -120,9 +175,8 @@ async def send_message(
         for rec in recipients_users
     ]
     session.add_all(new_rows)
+    await session.flush()
     await session.commit()
-    for row in new_rows:
-        await session.refresh(row)
 
     # Push immediately to online recipients.
     for row in new_rows:
@@ -156,7 +210,7 @@ async def _fetch_poll(session: AsyncSession, user: User) -> PollResponse:
         select(PendingMessage, User)
         .join(User, User.id == PendingMessage.sender_id)
         .where(PendingMessage.recipient_id == user.id)
-        .order_by(PendingMessage.id.asc())
+        .order_by(PendingMessage.id.asc()).limit(100)
     )
     pending_rows = result.all()
 
@@ -176,12 +230,12 @@ async def _fetch_poll(session: AsyncSession, user: User) -> PollResponse:
             )
         )
         if msg.delivered_at is None:
-            msg.delivered_at = now
-            to_mark.append(msg)
+            to_mark.append(msg.delivery_id)
 
     # Read receipts for messages this user originally sent.
     receipts_result = await session.execute(
-        select(ReadReceipt).where(ReadReceipt.sender_id == user.id).order_by(ReadReceipt.id.asc())
+        select(ReadReceipt).where(ReadReceipt.sender_id == user.id)
+        .order_by(ReadReceipt.id.asc()).limit(100)
     )
     receipts = list(receipts_result.scalars().all())
     incoming_receipts = [
@@ -197,6 +251,10 @@ async def _fetch_poll(session: AsyncSession, user: User) -> PollResponse:
     ]
 
     if to_mark:
+        await session.execute(update(PendingMessage).where(
+            PendingMessage.delivery_id.in_(to_mark),
+            PendingMessage.recipient_id == user.id,
+        ).values(delivered_at=now))
         await session.commit()
 
     return PollResponse(messages=incoming, read_receipts=incoming_receipts)
@@ -219,6 +277,8 @@ async def ack(
 ) -> dict[str, int]:
     """Confirm local persistence so rows can be deleted on the server."""
 
+    if not _settings.allow_legacy_ack:
+        raise HTTPException(410, "use /ack/exact")
     deleted_messages = 0
     deleted_receipts = 0
     if payload.message_ids:
@@ -258,6 +318,8 @@ async def mark_read(
     receipts themselves are removed after the sender ACKs them.
     """
 
+    if not _settings.allow_legacy_ack:
+        raise HTTPException(410, "use /read/exact")
     chat = await ensure_chat_member(session, chat_id, user)
 
     # Match pending rows for this chat/recipient and the given client_message_ids.
@@ -338,6 +400,10 @@ async def _finish_read(
         await session.commit()
         return {"marked": 0}
 
+    receipt_count = await session.scalar(select(func.count(ReadReceipt.id)))
+    if receipt_count + len(msgs) > _settings.max_read_receipts:
+        await session.rollback()
+        raise HTTPException(429, "receipt capacity reached", headers={"Retry-After": "60"})
     now = datetime.now(timezone.utc)
     receipts: list[ReadReceipt] = []
     for msg in msgs:

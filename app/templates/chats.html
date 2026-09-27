@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row with context %}
 {% block title %}Chats · Sideword{% endblock %}
 {% block content %}
 <h1>Chats</h1>
@@ -39,10 +39,12 @@
           <div class="row-actions">
           <form method="post" action="/admin/chats/{{ c.id }}/purge"
                 data-confirm="Delete all undelivered ciphertext for this chat?" data-confirm-label="Clear queue">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button class="danger">Clear queue</button>
           </form>
           <form method="post" action="/admin/chats/{{ c.id }}/delete"
                 data-confirm="Delete this chat, its memberships, queued messages, receipts and invite links? This cannot be undone.">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <input type="hidden" name="confirm" value="delete">
             <button class="danger">Delete</button>
           </form>

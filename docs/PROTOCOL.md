@@ -100,11 +100,11 @@ consumes a row and creates its receipt atomically, including concurrent requests
 The legacy `/ack` takes row IDs and `/read` takes client message IDs. Delayed
 ACKs can race row-ID reuse, and colliding client message IDs from different group
 senders are ambiguous to legacy `/read`. They remain supported for existing
-clients; new clients must not fall back to them. Server send idempotency remains
-future work: uploads with the same logical identity still create separate
-deliveries. Delivery IDs do not authenticate relay metadata or prevent replay
-by a malicious relay. Durable outbox and cross-tab storage coordination remain
-separate requirements.
+clients; new clients must not fall back to them. Server sends now deduplicate the chat/sender/client-message identity within a
+bounded retry window and reject conflicting envelope sets. Persist outgoing
+ciphertext before upload and retry the same envelopes. Delivery IDs do not authenticate relay metadata or prevent replay
+by a malicious relay. The bundled browser uses an encrypted persistent outbox and Web Locks for
+concurrent tabs. Browser-independent interoperability still requires release QA.
 
 `tests/client_crypto.test.cjs` checks both directions of v1 interoperability
 against Node's independent OpenSSL APIs using synthetic fixed keys, salt, and

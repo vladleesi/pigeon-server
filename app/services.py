@@ -6,7 +6,7 @@ import base64
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -130,6 +130,12 @@ async def activate_link(
     if not link.is_active or (capacity and max(link.uses_count, len(members)) >= capacity):
         raise HTTPException(410, "room sealed; reconnect with your saved session")
 
+    if len(members) >= 101:
+        raise HTTPException(429, "room participant capacity reached")
+    if current_user is None and (await session.scalar(select(func.count(User.id)))) >= (
+        get_settings().max_users
+    ):
+        raise HTTPException(429, "participant capacity reached")
     await authenticate_password(session, link, password)
     # A public key alone is not proof of identity. Never grant a reconnect based
     # on public data, nor let a lost response consume the same device's next slot.

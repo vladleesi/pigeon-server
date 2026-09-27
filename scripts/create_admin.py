@@ -14,10 +14,10 @@ import asyncio
 import getpass
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db import init_db, session_scope
-from app.models import Admin
+from app.models import Admin, AdminSession
 from app.security import hash_password
 
 
@@ -32,6 +32,7 @@ async def _run(username: str, password: str) -> int:
             print(f"created admin '{username}'")
         else:
             admin.password_hash = hash_password(password)
+            await session.execute(delete(AdminSession).where(AdminSession.admin_id == admin.id))
             print(f"updated password for admin '{username}'")
         await session.commit()
     return 0

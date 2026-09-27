@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..db import get_session
 from ..deps import get_current_user
-from ..models import Link, User
+from ..models import ClientSession, Link, User
 from ..schemas import ChatInfo, MeResponse
 from ..security import decode_client_token
 from ..services import get_user_chats, load_chat_info, user_to_participant
@@ -27,14 +28,26 @@ async def me(
     info: list[ChatInfo] = [await load_chat_info(session, c) for c in chats]
     payload = decode_client_token(authorization.split(" ", 1)[1].strip())
     link = await session.get(Link, int(payload["lid"]))
-    expiry = link.expires_at if link else None
+    expiry = datetime.fromtimestamp(payload["exp"], timezone.utc)
+    if link and link.expires_at:
+        expiry = min(expiry, link.expires_at.replace(tzinfo=timezone.utc))
     if expiry is not None:
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         expiry = min(expiry, datetime.fromtimestamp(payload["exp"], timezone.utc))
+    session_expiry = expiry
+    if payload.get("sid"):
+        record = await session.get(ClientSession, payload["sid"])
+        if record is None:
+            raise HTTPException(401, "session unavailable")
+        session_expiry = record.expires_at.replace(tzinfo=timezone.utc)
+        if link and link.expires_at:
+            session_expiry = min(session_expiry, link.expires_at.replace(tzinfo=timezone.utc))
     return MeResponse(
         user=user_to_participant(user),
         chats=info,
         access_expires_at=expiry,
+        session_expires_at=session_expiry,
         server_time=datetime.now(timezone.utc),
+        send_retry_window_seconds=get_settings().send_idempotency_days * 86400,
     )

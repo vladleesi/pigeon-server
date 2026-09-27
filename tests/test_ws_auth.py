@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timezone
 
 import pytest
-from fastapi.testclient import TestClient
+from csrf_client import TestClient
 from starlette.websockets import WebSocket
 
 from app.db import SessionLocal, init_db

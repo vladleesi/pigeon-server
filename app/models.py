@@ -213,3 +213,56 @@ class Admin(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class SendRecord(Base):
+    """Bounded retry ledger; contains hashes/routing metadata, never plaintext."""
+    __tablename__ = "send_records"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "sender_id", "client_message_id"),
+        Index("ix_send_records_sender_created", "sender_id", "created_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    client_message_id: Mapped[str] = mapped_column(String(64))
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    recipients_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    admin_id: Mapped[int] = mapped_column(ForeignKey("admins.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class LoginLimit(Base):
+    __tablename__ = "login_limits"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ClientSession(Base):
+    __tablename__ = "client_sessions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    public_id: Mapped[str] = mapped_column(String(64))
+    link_id: Mapped[int] = mapped_column(ForeignKey("links.id", ondelete="CASCADE"))
+    refresh_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked: Mapped[bool] = mapped_column(default=False)
+
+
+class RefreshUse(Base):
+    __tablename__ = "refresh_uses"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("client_sessions.id", ondelete="CASCADE"), index=True
+    )
+    next_hash: Mapped[str] = mapped_column(String(64))
+    retry_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))

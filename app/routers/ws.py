@@ -7,7 +7,7 @@ import base64
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import SessionLocal
@@ -42,7 +42,7 @@ async def _backlog_payload(
         select(PendingMessage, User)
         .join(User, User.id == PendingMessage.sender_id)
         .where(PendingMessage.recipient_id == user.id)
-        .order_by(PendingMessage.id.asc())
+        .order_by(PendingMessage.id.asc()).limit(100)
     )
     messages = [
         IncomingMessage(
@@ -60,7 +60,7 @@ async def _backlog_payload(
     r_res = await session.execute(
         select(ReadReceipt)
         .where(ReadReceipt.sender_id == user.id)
-        .order_by(ReadReceipt.id.asc())
+        .order_by(ReadReceipt.id.asc()).limit(100)
     )
     receipts = [
         IncomingReadReceipt(
@@ -121,21 +121,21 @@ async def ws_endpoint(websocket: WebSocket, token: str | None = Query(default=No
             async with SessionLocal() as current:
                 return await _resolve_user(current, auth_token) is not None
 
-        await manager.connect(user.id, websocket, validate_session)
+        try:
+            await manager.connect(user.id, websocket, validate_session)
+        except WebSocketDisconnect:
+            return
 
         try:
             messages, receipts = await _backlog_payload(session, user)
 
             # Backlog rows are treated as delivered once streamed down.
             if messages:
-                ids = [m.id for m in messages]
-                pending_rows = await session.execute(
-                    select(PendingMessage).where(PendingMessage.id.in_(ids))
-                )
-                now = datetime.now(timezone.utc)
-                for row in pending_rows.scalars().all():
-                    if row.delivered_at is None:
-                        row.delivered_at = now
+                await session.execute(update(PendingMessage).where(
+                    PendingMessage.delivery_id.in_([m.delivery_id for m in messages]),
+                    PendingMessage.recipient_id == user.id,
+                    PendingMessage.delivered_at.is_(None),
+                ).values(delivered_at=datetime.now(timezone.utc)))
                 await session.commit()
 
             if not await manager.validate(user.id, websocket):

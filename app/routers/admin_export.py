@@ -21,10 +21,13 @@ from ..models import (
     Chat,
     ChatMember,
     ChatType,
+    ClientSession,
     Link,
     LinkType,
     PendingMessage,
     ReadReceipt,
+    RefreshUse,
+    SendRecord,
     User,
 )
 
@@ -170,7 +173,8 @@ async def import_bundle(
 
     # Replace mode wipes mutable tables while admins remain untouched.
     if replace:
-        for model in (ReadReceipt, PendingMessage, ChatMember, Link, Chat, User):
+        for model in (RefreshUse, ClientSession, SendRecord, ReadReceipt,
+                      PendingMessage, ChatMember, Link, Chat, User):
             await session.execute(delete(model))
         await session.flush()
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row with context %}
 {% block title %}Users · Sideword{% endblock %}
 {% block content %}
 <h1>Users</h1>
@@ -43,14 +43,17 @@
           <div class="row-actions">
           {% if u.is_active %}
           <form method="post" action="/admin/users/{{ u.id }}/deactivate">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button class="danger">Block</button>
           </form>
           {% else %}
           <form method="post" action="/admin/users/{{ u.id }}/activate">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button>Unblock</button>
           </form>
           {% endif %}
           <form method="post" action="/admin/users/{{ u.id }}/delete" data-confirm="Permanently delete this user, their memberships and pending messages?">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <input type="hidden" name="confirm" value="delete">
             <button class="danger">Delete</button>
           </form>

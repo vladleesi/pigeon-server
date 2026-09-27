@@ -15,6 +15,7 @@
 <section class="card">
   <h2>Upload bundle</h2>
   <form class="stacked upload-form" method="post" action="/admin/api/import" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <label>
       <span>File</span>
       <input type="file" name="bundle" accept="application/json" required>

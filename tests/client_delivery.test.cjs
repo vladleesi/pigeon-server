@@ -22,6 +22,68 @@ function client() {
   return (code) => vm.runInContext(code, context);
 }
 
+function renderingClient() {
+  const run = client();
+  run(`
+    class TestNode {
+      constructor() { this.children = []; this.scrollTop = 0; this.clientHeight = 100; }
+      get firstChild() { return this.children[0]; }
+      get scrollHeight() { return this.children.length * 100; }
+      replaceChildren() { this.children = []; }
+      append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
+      insertBefore(node, reference) {
+        node.remove();
+        const index = reference ? this.children.indexOf(reference) : this.children.length;
+        this.children.splice(index, 0, node);
+        node.parent = this;
+      }
+      remove() {
+        if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1);
+        this.parent = null;
+      }
+    }
+    document.createElement = () => new TestNode();
+    elements.messageList = new TestNode();
+    selectedChatId = 7;
+    messagesByChat.set(7, [
+      { id: 'a', text: 'first', createdAt: 1 },
+      { id: 'c', text: 'third', createdAt: 3 },
+      { id: 'd', text: 'fourth', createdAt: 4 },
+    ]);
+    renderMessages();
+    globalThis.originalNodes = [...elements.messageList.children];
+  `);
+  return run;
+}
+
+test('incoming messages preserve existing nodes, chronological order, and reading position', async () => {
+  const run = renderingClient();
+  await run(`elements.messageList.scrollTop = 50;
+    appendMessage(7, { id: 'b', text: '<b>plain text</b>', createdAt: 2 })`);
+  assert.equal(run('elements.messageList.scrollTop'), 50);
+  assert.equal(run('elements.messageList.children[0] === originalNodes[0]'), true);
+  assert.equal(run('elements.messageList.children[2] === originalNodes[1]'), true);
+  assert.equal(run('elements.messageList.children[3] === originalNodes[2]'), true);
+  assert.equal(run('elements.messageList.children[1].children[0].textContent'), '<b>plain text</b>');
+  run('renderMessages()');
+  assert.equal(run('elements.messageList.scrollTop'), 50);
+  assert.equal(run('elements.messageList.children[0] === originalNodes[0]'), true);
+});
+
+test('new messages follow the bottom and switching chats clears previous messages', async () => {
+  const run = renderingClient();
+  await run(`elements.messageList.scrollTop = 200;
+    appendMessage(7, { id: 'e', text: 'latest', createdAt: 5 })`);
+  assert.equal(run('elements.messageList.scrollTop'), 400);
+  run(`selectedChatId = 8; renderMessages();`);
+  assert.equal(run('elements.messageList.children.length'), 1);
+  assert.equal(run('elements.messageList.firstChild.textContent'), 'No messages yet.');
+  await run(`appendMessage(8, { id: 'a', text: 'different chat', createdAt: 1 })`);
+  assert.equal(run('elements.messageList.children.length'), 1);
+  assert.equal(run('elements.messageList.firstChild.children[0].textContent'), 'different chat');
+  assert.equal(run('elements.messageList.firstChild === originalNodes[0]'), false);
+});
+
 test('reused SQLite row IDs do not drop new messages or receipts', async () => {
   const run = client();
   await run(`(async () => {

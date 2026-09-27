@@ -5,6 +5,7 @@ import asyncio
 import uvicorn
 from starlette.responses import PlainTextResponse
 
+from app.config import get_settings
 from app.main import create_app
 
 
@@ -33,11 +34,13 @@ async def main():
     # Uvicorn also logs WS URLs at INFO on uvicorn.error, independently of its
     # access_log option. Preserve warnings/errors and application error logging.
     local = uvicorn.Server(uvicorn.Config(
-        app, host="127.0.0.1", port=8000, access_log=False, log_level="warning",
+        app, host="127.0.0.1", port=8000, access_log=False, log_level="warning", ws_max_size=4096,
+        limit_concurrency=256, forwarded_allow_ips=get_settings().trusted_proxy_ips,
     ))
     public = uvicorn.Server(uvicorn.Config(
         PublicListener(app), host="127.0.0.1", port=8001, lifespan="off",
-        access_log=False, log_level="warning",
+        access_log=False, log_level="warning", ws_max_size=4096,
+        limit_concurrency=256, forwarded_allow_ips=get_settings().trusted_proxy_ips,
     ))
     await asyncio.gather(local.serve(), public.serve())
 

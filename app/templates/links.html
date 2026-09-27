@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "admin_table.html" import selection_toolbar, select_all, select_row %}
+{% from "admin_table.html" import selection_toolbar, select_all, select_row with context %}
 {% block title %}Links · Sideword{% endblock %}
 {% block container_class %}links-container{% endblock %}
 {% block content %}
@@ -36,6 +36,7 @@
   {% set values = form_values|default({}) %}
   {% set errors = field_errors|default({}) %}
   <form id="create-link-form" method="post" action="/admin/links" class="invite-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <div class="invite-form-row invite-form-details">
       <label class="invite-type">
         <span>Type</span>
@@ -158,14 +159,17 @@
           <div class="row-actions">
           {% if not link.is_revoked and not link.is_expired %}
           <form method="post" action="/admin/links/{{ link.id }}/revoke">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button class="danger">Revoke</button>
           </form>
           {% elif not link.is_expired %}
           <form method="post" action="/admin/links/{{ link.id }}/reactivate">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button>Restore</button>
           </form>
           {% endif %}
           <form method="post" action="/admin/links/{{ link.id }}/delete" data-confirm="Delete this link and invalidate its sessions? This cannot be undone.">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <input type="hidden" name="confirm" value="delete">
             <button class="danger">Delete</button>
           </form>

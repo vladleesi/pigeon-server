@@ -7,7 +7,9 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
+
+from .config import get_settings
 
 
 class ConnectionManager:
@@ -20,6 +22,9 @@ class ConnectionManager:
         self, user_id: int, websocket: WebSocket, validate: Callable[[], Awaitable[bool]]
     ) -> None:
         async with self._lock:
+            if len(self._connections[user_id]) >= get_settings().max_ws_per_user:
+                await websocket.close(code=1008)
+                raise WebSocketDisconnect(code=1008)
             self._connections[user_id].add(websocket)
             self._validators[websocket] = validate
 
@@ -55,7 +60,7 @@ class ConnectionManager:
         for ws in sockets:
             try:
                 if await self.validate(user_id, ws):
-                    await ws.send_json(payload)
+                    await asyncio.wait_for(ws.send_json(payload), timeout=5)
             except Exception:
                 await self.disconnect(user_id, ws)
 

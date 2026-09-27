@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
+from csrf_client import TestClient
 from sqlalchemy import select
 
 from app.db import SessionLocal
@@ -86,7 +86,7 @@ def test_deadline_and_expired_restore(client):
     assert "This link has expired" in response.text
     _, unlimited = make_link()
     data = client.get("/api/v1/me", headers=headers(activate(client, unlimited))).json()
-    assert data["access_expires_at"] is None
+    assert data["access_expires_at"] is not None
 
 
 def test_delete_link_invalidates_sessions_and_cannot_be_restored(client):

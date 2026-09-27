@@ -44,6 +44,8 @@ let socketAuthTimer = null;
 let accessDeadline = null;
 let inboundQueue = Promise.resolve();
 const messagesByChat = new Map();
+const renderedMessages = new Map();
+let renderedChatId;
 const seenMessageIds = new Set();
 const seenReceiptIds = new Set();
 const processingMessageIds = new Set();
@@ -75,16 +77,32 @@ async function readIdentity() {
   });
 }
 
-async function writeIdentity(value) {
+async function writeIdentity(value, updateSession = false) {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put(value, IDENTITY_KEY);
+    const store = transaction.objectStore(STORE_NAME);
+    const current = store.get(IDENTITY_KEY);
+    current.onsuccess = () => {
+      // Routine profile/history updates must not overwrite a newer rotation
+      // committed by another tab while a network request was in flight.
+      if (!updateSession && current.result && current.result.publicId === value.publicId) {
+        for (const field of ["token", "suspendedToken", "refreshCredential", "sessionId",
+          "tokenExpiresAt", "sessionExpiresAt", "pendingRefreshCredential"]) {
+          if (Object.hasOwn(current.result, field)) value[field] = current.result[field];
+          else delete value[field];
+        }
+      }
+      store.put(value, IDENTITY_KEY);
+    };
     transaction.oncomplete = () => {
       database.close();
       resolve();
     };
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = transaction.onabort = () => {
+      database.close();
+      reject(transaction.error || new Error("Identity storage failed"));
+    };
   });
 }
 
@@ -185,9 +203,9 @@ async function assertTrustedPeer(peer) {
   }
 }
 
-async function readHistoryRecords() {
+async function readHistoryRecords(recordPrefix = null) {
   if (!identity?.publicId) return [];
-  const prefix = `${HISTORY_PREFIX}${identity.publicId}:`;
+  const prefix = recordPrefix || `${HISTORY_PREFIX}${identity.publicId}:`;
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const records = [];
@@ -218,7 +236,7 @@ async function clearStoredHistory() {
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) return;
-      if (typeof cursor.key === "string" && cursor.key.startsWith(HISTORY_PREFIX)) {
+      if (typeof cursor.key === "string" && (cursor.key.startsWith(HISTORY_PREFIX) || cursor.key.startsWith("outbox:"))) {
         cursor.delete();
       }
       cursor.continue();
@@ -297,7 +315,7 @@ async function invalidateSession(reason = "Session expired") {
   identity.token = null;
   accessDeadline = null;
   updateSessionCountdown();
-  await writeIdentity(identity);
+  await writeIdentity(identity, true);
   chats = [];
   selectedChatId = null;
   window.clearTimeout(reconnectTimer);
@@ -314,7 +332,58 @@ async function invalidateSession(reason = "Session expired") {
   throw new SessionExpiredError(`${reason}. Activate a valid invite to continue.`);
 }
 
+function randomCredential() {
+  return bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))
+    .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+async function deviceLock(name, action) {
+  if (!globalThis.navigator?.locks) {
+    throw new Error("This browser needs Web Locks for safe session and message retries.");
+  }
+  return navigator.locks.request(`sideword:${name}`, action);
+}
+
+async function ensureFreshSession(force = false) {
+  if (!identity?.token) return;
+  const previousToken = identity.token;
+  await deviceLock("session", async () => {
+    const stored = await readIdentity();
+    if (stored?.publicId !== identity.publicId) throw new Error("Device changed in another tab. Reload.");
+    identity = stored;
+    if ((!force || identity.token !== previousToken) && identity.refreshCredential
+        && Date.now() < identity.tokenExpiresAt - 60000) return;
+    const migrating = !identity.refreshCredential;
+    identity.pendingRefreshCredential ||= randomCredential();
+    await writeIdentity(identity, true); // Keep the proposed rotation if the response/save is lost.
+    const response = await fetch(migrating ? "/api/v1/sessions" : "/api/v1/sessions/refresh", {
+      method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", ...(migrating
+        ? { Authorization: `Bearer ${identity.token}` } : {}) },
+      body: JSON.stringify(migrating ? { credential: identity.pendingRefreshCredential } : {
+        credential: identity.refreshCredential, next_credential: identity.pendingRefreshCredential,
+      }),
+    });
+    if (!response.ok) {
+      if (response.status === 401) await invalidateSession("Session expired or revoked");
+      throw new Error("Session renewal failed. Retry without resetting this device.");
+    }
+    const result = await response.json();
+    identity.token = result.token;
+    identity.sessionId = result.session_id;
+    identity.tokenExpiresAt = Date.parse(result.access_expires_at);
+    identity.sessionExpiresAt = Date.parse(result.session_expires_at);
+    identity.refreshCredential = identity.pendingRefreshCredential;
+    delete identity.pendingRefreshCredential;
+    await writeIdentity(identity, true);
+    if (socket) { const old = socket; socket = null; old.close(); }
+    connectSocket();
+  });
+}
+
 async function api(path, options = {}) {
+  const activation = path.includes("/links/");
+  if (!activation && identity?.token) await ensureFreshSession();
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -393,16 +462,42 @@ function compareHistoryEntries(left, right) {
 }
 
 function renderMessages() {
-  elements.messageList.replaceChildren();
+  const list = elements.messageList;
+  const changedChat = renderedChatId !== selectedChatId;
+  const followLatest = changedChat || list.scrollHeight - list.clientHeight - list.scrollTop <= 32;
+  if (changedChat) {
+    list.replaceChildren();
+    renderedMessages.clear();
+    renderedChatId = selectedChatId;
+  }
   const entries = [...(messagesByChat.get(selectedChatId) || [])].sort(compareHistoryEntries);
   if (!entries.length) {
+    if (list.firstChild && !renderedMessages.size) return;
+    list.replaceChildren();
+    renderedMessages.clear();
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "No messages yet.";
-    elements.messageList.append(empty);
+    list.append(empty);
     return;
   }
+  if (!renderedMessages.size) list.replaceChildren();
+  const keys = new Set(entries.map(entry => entry.id || entry));
+  for (const [key, node] of renderedMessages) {
+    if (!keys.has(key)) {
+      node.remove();
+      renderedMessages.delete(key);
+    }
+  }
+  let position = 0;
   for (const entry of entries) {
+    const key = entry.id || entry;
+    const existing = renderedMessages.get(key);
+    if (existing) {
+      if (list.children[position] !== existing) list.insertBefore(existing, list.children[position] || null);
+      position++;
+      continue;
+    }
     const message = document.createElement("div");
     message.className = `message ${entry.kind}`;
     const text = document.createElement("span");
@@ -414,9 +509,11 @@ function renderMessages() {
       meta.textContent = entry.meta;
       message.append(meta);
     }
-    elements.messageList.append(message);
+    list.insertBefore(message, list.children[position] || null);
+    renderedMessages.set(key, message);
+    position++;
   }
-  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  if (followLatest) list.scrollTop = list.scrollHeight;
 }
 
 function chatName(chat) {
@@ -450,6 +547,7 @@ function renderChats() {
 }
 
 function selectChat(chatId) {
+  const changedChat = renderedChatId !== chatId;
   selectedChatId = chatId;
   const chat = chats.find((candidate) => candidate.id === chatId);
   elements.conversationKind.textContent = chat?.chat_type || "Conversation";
@@ -470,7 +568,7 @@ function selectChat(chatId) {
   elements.sendButton.disabled = !canSend;
   renderChats();
   renderMessages();
-  if (canSend) elements.messageInput.focus();
+  if (canSend && changedChat) elements.messageInput.focus({ preventScroll: true });
 }
 
 function updateIdentityUi() {
@@ -492,8 +590,9 @@ function updateConnectionState(connected) {
 async function loadChats() {
   if (!identity?.token) return;
   const data = await api("/api/v1/me");
-  accessDeadline = data.access_expires_at
-    ? performance.now() + serverTimestamp(data.access_expires_at) - serverTimestamp(data.server_time)
+  const deadline = data.session_expires_at || data.access_expires_at;
+  accessDeadline = deadline
+    ? performance.now() + serverTimestamp(deadline) - serverTimestamp(data.server_time)
     : null;
   updateSessionCountdown();
   if (data.user.public_key !== identity.publicKey) {
@@ -506,12 +605,13 @@ async function loadChats() {
     checkedChats.push({ ...chat, participants });
   }
   identity.publicId = data.user.public_id;
+  identity.retryWindowSeconds = data.send_retry_window_seconds;
   await writeIdentity(identity);
   chats = checkedChats;
   if (selectedChatId && !chats.some((chat) => chat.id === selectedChatId)) selectedChatId = null;
   if (!selectedChatId && chats.length) selectedChatId = chats[0].id;
-  renderChats();
   if (selectedChatId) selectChat(selectedChatId);
+  else renderChats();
 }
 
 function senderKeyIsLoaded(message) {
@@ -634,6 +734,8 @@ async function synchronize() {
   synchronizing = true;
   try {
     await loadChats();
+    try { await flushOutbox(); } catch (error) { showToast(errorMessage(error), true); }
+    await renderOutbox();
     const data = await api("/api/v1/poll");
     await enqueueIncoming(() => processIncoming(data));
   } catch (error) {
@@ -653,6 +755,11 @@ function scheduleReconnect() {
 
 async function handleSocketPayload(payload) {
   if (payload.type === "auth_error") {
+    if (identity?.refreshCredential) {
+      await ensureFreshSession(true);
+      connectSocket();
+      return;
+    }
     await invalidateSession("The saved session is no longer valid");
   } else if (payload.type === "hello") {
     updateConnectionState(true);
@@ -771,6 +878,10 @@ elements.activationForm.addEventListener("submit", async (event) => {
     if (!identity) identity = await generateIdentity();
     await ensureStorageKey();
     const resumeCredential = await prepareInviteResume(token);
+    identity.activationCredentials ||= {};
+    identity.activationCredentials[token] ||= randomCredential();
+    await writeIdentity(identity);
+    const sessionCredential = identity.activationCredentials[token];
     const previousPublicId = identity.publicId;
     const password = elements.roomPassword.value;
     elements.roomPassword.value = "";
@@ -781,6 +892,7 @@ elements.activationForm.addEventListener("submit", async (event) => {
         display_name: displayName,
         password: password || undefined,
         resume_credential: resumeCredential,
+        session_credential: sessionCredential,
       }),
     });
     if (previousPublicId && previousPublicId !== result.user.public_id) {
@@ -790,9 +902,15 @@ elements.activationForm.addEventListener("submit", async (event) => {
       seenReceiptIds.clear();
     }
     identity.token = result.token;
+    identity.refreshCredential = sessionCredential;
+    identity.sessionId = result.session_id;
+    identity.tokenExpiresAt = Date.parse(result.access_expires_at);
+    identity.sessionExpiresAt = Date.parse(result.session_expires_at);
+    delete identity.activationCredentials[token];
+    delete identity.pendingRefreshCredential;
     identity.suspendedToken = null;
     identity.publicId = result.user.public_id;
-    await writeIdentity(identity);
+    await writeIdentity(identity, true);
     history.replaceState(null, "", "/client");
     updateIdentityUi();
     await refresh();
@@ -817,6 +935,87 @@ elements.messageInput.addEventListener("keydown", (event) => {
   elements.messageForm.requestSubmit(elements.sendButton);
 });
 
+async function renderOutbox() {
+  const panel = document.querySelector("#pending-sends");
+  const list = document.querySelector("#pending-send-list");
+  if (!panel || !identity?.publicId) return;
+  const records = await readHistoryRecords(`outbox:${identity.publicId}:`);
+  const rows = [];
+  for (const stored of records) {
+    const row = document.createElement("li");
+    try {
+      const decoded = await crypto.subtle.decrypt({ name: "AES-GCM", iv: stored.value.iv,
+        additionalData: encoder.encode(stored.key) }, identity.storageKey, stored.value.ciphertext);
+      const record = JSON.parse(decoder.decode(decoded));
+      row.textContent = `${record.expiresAt <= Date.now() ? "Retry expired" : "Pending"}: ${record.plaintext} `;
+    } catch { row.textContent = "Unreadable pending message. "; }
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.textContent = "Discard retry";
+    discard.addEventListener("click", async () => {
+      if (!window.confirm("Discard this saved retry? The message may already have reached the server. This cannot undo delivery.")) return;
+      try {
+        await deviceLock(`outbox:${identity.publicId}`, () => removeOutbox(stored.key));
+        await renderOutbox();
+      } catch (error) { showToast(errorMessage(error), true); }
+    });
+    row.append(discard);
+    rows.push(row);
+  }
+  list.replaceChildren(...rows);
+  panel.hidden = records.length === 0;
+}
+
+document.querySelector("#retry-pending-sends").addEventListener("click", () => {
+  void synchronize();
+});
+
+async function persistOutbox(record) {
+  if (!identity.storageKey) throw new Error("Local storage key is unavailable.");
+  const key = `outbox:${identity.publicId}:${record.chatId}:${record.messageId}`;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: encoder.encode(key) },
+    identity.storageKey, encoder.encode(JSON.stringify(record)),
+  );
+  await putDatabaseValue(key, { iv, ciphertext });
+}
+
+async function removeOutbox(key) {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(key);
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onabort = transaction.onerror = () => {
+      database.close(); reject(transaction.error || new Error("Outbox update failed"));
+    };
+  });
+}
+
+async function flushOutbox() {
+  if (!identity?.token) return;
+  await deviceLock(`outbox:${identity.publicId}`, async () => {
+    const records = await readHistoryRecords(`outbox:${identity.publicId}:`);
+    for (const stored of records) {
+      const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: stored.value.iv,
+        additionalData: encoder.encode(stored.key) }, identity.storageKey, stored.value.ciphertext);
+      const record = JSON.parse(decoder.decode(plaintext));
+      if (record.expiresAt <= Date.now()) {
+        throw new Error("An outgoing retry expired. It remains saved; verify delivery before resending.");
+      }
+      const result = await api(`/api/v1/chats/${record.chatId}/messages`, {
+        method: "POST", body: JSON.stringify({ client_message_id: record.messageId,
+          envelopes: record.envelopes }),
+      });
+      await appendMessage(record.chatId, { id: `outgoing:${record.messageId}`, kind: "mine",
+        text: record.plaintext, meta: `Sent ? ${record.messageId.slice(0, 8)}`,
+        createdAt: serverTimestamp(result.created_at) });
+      await removeOutbox(stored.key); // History must commit before removing retry state.
+    }
+  });
+}
+
 elements.messageForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const plaintext = elements.messageInput.value.trim();
@@ -832,23 +1031,27 @@ elements.messageForm.addEventListener("submit", async (event) => {
         ciphertext: await encryptForRecipient(plaintext, chat.id, messageId, recipient),
       })),
     );
-    const result = await api(`/api/v1/chats/${chat.id}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ client_message_id: messageId, envelopes }),
-    });
-    await appendMessage(chat.id, {
-      id: `outgoing:${messageId}`,
-      kind: "mine",
-      text: plaintext,
-      meta: `Sent · ${messageId.slice(0, 8)}`,
-      createdAt: serverTimestamp(result.created_at),
+    if (!identity.retryWindowSeconds) throw new Error("Server does not support durable retries.");
+    const record = { chatId: chat.id, messageId, envelopes, plaintext,
+      expiresAt: Date.now() + Math.max(0, identity.retryWindowSeconds - 300) * 1000,
+      createdAt: Date.now() };
+    await deviceLock(`outbox:${identity.publicId}`, async () => {
+      if ((await readHistoryRecords(`outbox:${identity.publicId}:`)).length >= 100) {
+        throw new Error("Local outbox is full. Retry pending messages first.");
+      }
+      await persistOutbox(record);
     });
     elements.messageInput.value = "";
+    try {
+      await flushOutbox();
+    } finally {
+      await renderOutbox();
+    }
   } catch (error) {
     showToast(errorMessage(error), true);
   } finally {
     elements.sendButton.disabled = false;
-    elements.messageInput.focus();
+    elements.messageInput.focus({ preventScroll: true });
   }
 });
 

@@ -5,10 +5,12 @@ independent audit or proof that the application has no vulnerabilities.
 
 ## Decision and threat model
 
-Keep the existing v1 protocol, APIs, identities, JWTs, invite retry credentials,
-group fanout, delivery rules, and encrypted browser history. Do not roll out a
-ratchet, new signing identity, credential rotation, or shorter default expiry
-without an independently reviewed migration. The [wire contract](PROTOCOL.md)
+Keep the existing v1 encryption protocol, identities, invite retry credentials,
+group fanout, delivery rules, and encrypted browser history. Release 0.3.0 adds
+renewable sessions with shorter access tokens; the bundled client migrates valid
+legacy sessions automatically. Legacy API clients remain compatible until the
+operator sets explicit sunset controls. A ratchet or new signing identity still
+requires a separately reviewed migration. The [wire contract](PROTOCOL.md)
 now has a separate implementation boundary for future native clients.
 
 Consider passive network observers, leaked databases/backups, stolen bearer
@@ -26,7 +28,7 @@ and TLS terminator with submitted passwords; these are not message keys.
 | Identity | Calculate full fingerprints locally; pin the first peer key with an atomic persistent check; block changed keys before encryption/decryption | Trust on first use is not authentication. Initial substitution, new public IDs, malicious rosters, and malicious served code remain possible. |
 | Key storage | Generate new identity and ephemeral private CryptoKeys non-exportable from the outset; remove identity export/reimport | Same-origin script can still invoke keys and read decrypted data; browser/profile compromise and copied storage remain threats. |
 | WebSocket sessions | Revalidate the individual socket credential before each push/backlog, on incoming frames, and every 30 seconds while idle | A check cannot retract data already sent or eliminate the small check/send race. Extra database reads are a deliberate cost. |
-| Persistence/deletion | Missing history storage fails closed; exact ACK/read bind random delivery IDs and full logical identities; read deletion and receipt creation are atomic | Legacy clients retain ambiguous deletion APIs. Send idempotency and multi-tab local storage coordination remain follow-up work. |
+| Persistence/deletion | Missing history storage fails closed; exact ACK/read bind random delivery IDs and full logical identities; read deletion and receipt creation are atomic | Legacy clients retain ambiguous deletion APIs. Send retries now use a bounded ledger and encrypted local outbox; real-browser QA remains unverified. |
 | Metadata | Shared runner disables raw access logs on both listeners; browser polling no longer adds a redundant client timestamp | Proxy/CDN/container logs are separately controlled; sender/recipient IDs, membership, timing, ciphertext sizes, and receipts remain visible to the relay. |
 
 Pins occupy new `peer:` records in the existing IndexedDB store. Existing history
@@ -49,36 +51,43 @@ destructive ACK/read operations; they are not proof of possession of a message
 private key. Stolen JWTs cannot alone decrypt messages but can fetch or delete
 ciphertext and disrupt delivery. Tokens are not bound to a specific device key.
 
-Defaults remain 30 days for client JWTs and 12 hours for admin sessions. Reducing
-these now would affect newly issued tokens without providing all existing
-clients a refresh path. Invite resume credentials are high-entropy bearer
-secrets with SHA-256 digests on the server; they do not rotate or expire
-independently of the invite lifecycle. Stateless JWT logout cannot invalidate
-an already stolen token. Rotating the signing secret invalidates all sessions.
+Renewable sessions are additive: new browser activations opt in, and a browser
+with a valid legacy JWT exchanges it for a registered session. Access tokens
+last 15 minutes; registered sessions expire after 30 days without extension.
+Refresh credentials are stored as SHA-256 digests. Rotation records retain old
+digests until session expiry to detect replay. The client persists a proposed
+new credential before submitting it; the identical old/new pair may retry for
+30 seconds while that successor remains current. Other old-token reuse revokes
+the session. HTTP and WS validate the session registry, user, and invite.
+Per-device session listing/revocation is available through the API. Browser
+Web Locks serialize rotations; ordinary identity saves preserve newer credentials
+written by another tab. Long offline periods do not erase retained history.
 
-Next, design an additive session registry with short-lived access tokens,
-hashed rotating refresh credentials, replay detection, bounded retry grace for
-lost responses, per-device revocation, and explicit legacy-token sunset.
-Account for concurrent tabs, offline clients, sealed invites, restored invites,
-and lost activation responses before selecting default TTLs. Do not silently
-rotate invite retry secrets: a lost response could otherwise strand the only
-credential able to resume a sealed room.
+Legacy JWTs retain their existing expiry unless the operator sets
+`SIDEWORD_LEGACY_TOKEN_DEADLINE`. They can still bypass per-device revocation
+until sunset; do not call migration complete before disabling them. Existing
+invite resume credentials deliberately remain independent and stable, enabling
+explicit recovery into a fresh session after revocation. A stolen resume secret
+therefore remains an admission credential until the invite is revoked/deleted.
+New renewable activations persist their initial session secret before admission,
+so a lost response does not strand a sealed room. Sessions are bearer credentials,
+not proof of possession of the message private key. Independent review is still
+required before declaring the credential migration production-ready.
 
-Password admission already uses salted scrypt, constant-time verifier checks,
-per-invite persisted attempt limits, secure-transport enforcement for passwords,
-and serialized admission transactions. Guessing can still lock out an invite;
-the expensive password KDF and unlimited unprotected requests need deployment
-resource/rate limits. URL invite secrets and local resume credentials must be
-treated as credentials. Non-password admission and API transport rely on the
-deployment enforcing TLS. No extra request secrets are introduced in this pass.
+Admin JWTs now require a live server-side session. Logout and CLI password resets
+revoke sessions; old stateless admin JWTs require a fresh login. Admin forms,
+including login and multipart import, carry signed cookie/session-bound CSRF
+tokens. Unsafe requests check Origin; no-referrer forms with absent/null Origin
+require same-origin Fetch Metadata and a valid CSRF token. Clients without Origin
+or Fetch Metadata need the CSRF header. Explicit foreign origins are rejected. Cookie-free admin API bearer requests do not use ambient cookie
+authority. Cookies are HttpOnly/SameSite=Strict and Secure on HTTPS or a configured
+HTTPS public URL. Login limits persist across processes/restarts, use keyed hashes
+of IP/account identifiers, and apply before password verification. Lockouts can
+still deny service to an account within their one-minute window.
 
-Admin cookies use HttpOnly and SameSite=Strict; Secure depends on the configured
-public URL. Admin sessions remain stateless, without explicit CSRF tokens,
-server-side logout revocation, or login throttling. Keep administration private;
-SameSite alone is not a complete defense against hostile same-site origins.
-These flows need their own tested hardening pass, not changes hidden in an E2EE
-migration. `/me` currently reports no access deadline for an unlimited invite,
-even though its JWT still expires; expiry enforcement itself uses the JWT.
+`/me` reports both access-token and renewable-session deadlines, including for
+unlimited invites. Invite expiry caps both. Short access-token expiry no longer
+causes the browser to discard a renewable session while offline.
 
 ## Follow-up: exact delivery acknowledgements
 
@@ -98,15 +107,46 @@ requests have bounded reference lists and reject unknown fields. The browser
 batches up to 100 references, retains failed batches, and does not fall back to
 ambiguous legacy APIs when exact support is unavailable.
 
-This is deletion hardening, not send idempotency or proof of decryption. Duplicate
-uploads still produce separate deliveries and can produce separate receipts.
-Clients still deduplicate history by logical message identity. A stolen JWT can
-still delete its owner's rows; malicious relay metadata and served code remain
-outside this protection. No permanent deduplication ledger is introduced.
-Delivery IDs are retained only with the queued row. Restored backups can replay
-previously acknowledged rows, so local history deduplication remains necessary.
-See [upgrade notes](UPGRADING.md#exact-delivery-acknowledgements) for rollout,
-SQLite requirements, and rollback constraints.
+## Follow-up: delivery integrity and resource limits
+
+Sends are serialized with SQLite write transactions and keyed by chat, sender,
+and client message ID. Within the configured 30-day retry window, identical
+recipient/ciphertext payloads return the original response without enqueueing
+again; conflicting payloads receive 409. Partial group delivery, ACK/read deletion,
+and outbox cancellation do not remove retry evidence. The ledger contains hashes,
+routing metadata, and timestamps, not plaintext or retained ciphertext. It expires
+independently of queued deliveries. Evidence absent from older backups cannot be
+reconstructed. Pre-upgrade queued rows without ledger records reject matching
+IDs rather than silently creating another fanout; already deleted pre-upgrade
+messages have no retry guarantee.
+
+The browser encrypts outgoing plaintext/envelopes locally before upload and
+reuses the saved ciphertext across retries and reloads. History commits before
+the retry record is removed. Web Locks serialize outbox uploads across tabs.
+Expired retries remain visible for manual resolution and are never automatically
+resent beyond the ledger window. Pending-send failures do not block polling.
+Legacy ACK/read APIs can be retired with `SIDEWORD_ALLOW_LEGACY_ACK=false` after
+client migration. Compatibility defaults still permit their original risks.
+
+ASGI guards bound bodies (including chunked requests), body-read time, request
+rates, WS connections and inbound frames. Database transactions bound queued
+message counts/bytes, receipts, send records and participant creation. Capacity
+exhaustion rejects new work without evicting live retry evidence. Poll/backlog
+batches are bounded. Login hashing runs off the event loop, and invite admission
+holds a database write reservation while verifying scrypt, bounding concurrent
+admission KDFs. Distributed traffic and slow peers still require gateway limits;
+HTTP/WS rate/connection counters are per process, whereas database quotas and
+login limits are shared. Defaults and tuning are in `.env.example` and the API
+and upgrade guides. Unauthenticated origin-wide quotas can be exhausted by an
+attacker; rate limits bound cost, not availability under every attack.
+
+HTTPS/WSS is required outside a loopback peer plus loopback Host. Administration
+and schema routes require that same local boundary by default, in addition to the
+shared listener's allowlist. Only explicitly trusted proxy IPs may supply client
+address/scheme. Docker/shared runner suppress access logs and bound transport
+concurrency/frame sizes. SQL exception logging hides query parameters. Upstream
+logging, HSTS, backup encryption/access, and host/container resource limits remain
+operator responsibilities; no production environment was modified in this pass.
 
 ## Local history, metadata, and deployment
 
@@ -127,8 +167,8 @@ Queued ciphertext and receipts expire after the configured TTL (default 30 days;
 cleanup runs hourly) or are deleted on read/ACK. Users, memberships, invite
 credentials/verifiers, names, last-seen timestamps, and configuration exports
 persist separately. Logical SQLite deletion is not secure erasure: WAL, free
-pages, snapshots, backups, and storage media may retain old bytes. No shorter
-TTL or automatic metadata purge is introduced because that could destroy offline
+pages, snapshots, backups, and storage media may retain old bytes. No shorter message
+TTL or automatic user/invite purge is introduced because that could destroy offline
 delivery or reconnects. Limit backup/export access and retention independently.
 
 The `/client` CSP denies inline/external scripts, framing, object embedding, and
@@ -177,11 +217,11 @@ JavaScript port solely because it runs in the current browser client.
 
 ## Migration gates and next work
 
-1. Exact-identity ACK/read support is implemented with tests for delayed ACKs,
-   row reuse (including repeated logical IDs), group-ID collisions, lost responses,
-   concurrent reads, transaction rollback, and backups. Next add server send
-   idempotency with an explicit retention policy, conflict handling, durable
-   outgoing retries, and real multi-tab storage tests. Preserve legacy endpoints.
+1. Stages 1-4 have code and automated regression coverage: exact delivery, bounded
+   send idempotency/outbox, admin CSRF/revocation/throttling, renewable sessions,
+   and transport/resource guards. Roll out server-first, validate operator controls,
+   migrate clients, then explicitly sunset legacy JWTs and ACKs. Real-browser QA
+   is skipped at the user's request; independent security review remains open.
 2. Prototype protocols away from live identities. Compare maintenance, licensing,
    mobile/browser support, audit coverage, memory/key storage, offline behavior,
    group membership, and bandwidth. Require cross-language vectors and review.
@@ -197,12 +237,31 @@ JavaScript port solely because it runs in the current browser client.
    Use explicit opt-in sessions/rooms for v2. For mixed groups, require all members
    to agree before upgrading; define membership epochs and leaving-member access.
    Do not dual-encrypt the same new plaintext under v1 and claim ratchet security.
-6. Introduce renewable credentials independently. Stage rollout, test rollback
+6. Renewable credentials are implemented independently. Stage rollout, test rollback
    with isolated backups, then obtain independent security review before making
    v2 or shorter sessions the default. Rollback must not reset ratchet state or
    reuse message keys. Old messages gain no retroactive forward secrecy.
 
 ## Verification and limits
+
+Release 0.3.0 preparation reviewed authentication, refresh replay handling, CSRF,
+delivery retry/retention, quotas, and changed client persistence paths. Malformed
+non-ASCII CSRF values now return 403 instead of raising a comparison error.
+Same-origin no-referrer login regression coverage and chat layout fixes are
+included. This source review does not replace an independent security audit.
+
+Initial stages 1-4 automated validation: **87 Python tests and 34 JavaScript tests
+passed**. Ruff, client/form syntax checks, documentation targets, structured data,
+Docker command syntax, whitespace and privacy exclusions passed. Coverage includes
+send races, conflicting retries, partial group delivery, retained backup evidence,
+queue limits, encrypted outbox recovery, refresh replay/grace, stale-tab writes,
+admin CSRF/logout/throttling, private routes, TLS, chunked bodies, and WS limits.
+The existing Starlette/AnyIO deprecation warning remains. Browser checks are
+skipped at the user's request. The security changes and login fix were deployed to the local backend during
+follow-up work. Release 0.3.0 preparation adds the malformed-CSRF regression fix;
+that follow-up has not been redeployed. Compatibility sunsets and upstream/backup
+operational controls remain rollout tasks.
+
 
 Tests were added before changing cryptographic wrappers, identity checks, socket
 authorization, and persistence failure behavior. Coverage includes independent
@@ -230,10 +289,8 @@ Starlette/AnyIO warning remains. API/upgrade docs, landing copy and snippets wer
 updated; SEO metadata and the backend-focused social preview remain accurate.
 Browser checks in this pass used the Node harness, not a live browser session.
 
-Live browser verification remains incomplete: initial browser discovery found
-no connection, and a later attempt was blocked by a browser integration mismatch.
-IndexedDB transaction tests use a serialized adapter; real browser behavior and
-native cross-platform interoperability still need release QA. This review does
-not include penetration testing, a full dependency audit, load testing, or a
-cryptographic proof. No running service, production database, or deployed client
-was migrated or restarted.
+IndexedDB tests use serialized adapters rather than a real browser. Browser
+behavior and native cross-platform interoperability still need release QA. This
+review does not include penetration testing, a full dependency audit, load testing,
+or a cryptographic proof. No running service or production database was migrated
+or restarted during the stages 1-4 implementation.

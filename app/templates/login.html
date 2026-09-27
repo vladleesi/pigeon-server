@@ -5,6 +5,7 @@
   <h1>Admin sign-in</h1>
   {% if error %}<div class="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/admin/login" class="stacked">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <label>
       <span>Username</span>
       <input type="text" name="username" autocomplete="username" autofocus required>

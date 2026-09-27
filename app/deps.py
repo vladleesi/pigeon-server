@@ -8,8 +8,9 @@ import jwt
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .config import get_settings
 from .db import get_session
-from .models import Admin, Link, User
+from .models import Admin, AdminSession, ClientSession, Link, User
 from .security import decode_admin_token, decode_client_token
 
 ADMIN_COOKIE_NAME = "sideword_admin_session"
@@ -43,6 +44,17 @@ async def resolve_client_user(session: AsyncSession, token: str) -> User | None:
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         if expiry <= datetime.now(timezone.utc):
+            return None
+    now = datetime.now(timezone.utc)
+    if "sid" in payload:
+        record = await session.get(ClientSession, payload["sid"])
+        if (record is None or record.revoked or record.user_id != user.id
+                or record.public_id != user.public_id or record.link_id != link.id
+                or record.expires_at.replace(tzinfo=timezone.utc) <= now):
+            return None
+    else:
+        deadline = get_settings().legacy_token_deadline
+        if deadline is not None and now >= deadline.replace(tzinfo=timezone.utc):
             return None
     return user
 
@@ -91,8 +103,10 @@ async def get_current_admin(
         raise HTTPException(status_code=401, detail="invalid subject") from exc
 
     admin = await session.get(Admin, admin_id)
-    if admin is None:
-        raise HTTPException(status_code=401, detail="admin not found")
+    record = await session.get(AdminSession, payload.get("sid", ""))
+    if (admin is None or record is None or record.admin_id != admin_id
+            or record.expires_at.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc)):
+        raise HTTPException(401, "admin session expired or revoked")
     return admin
 
 
