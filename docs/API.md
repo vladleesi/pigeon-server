@@ -1,14 +1,15 @@
 # Client API
 
-See `/docs` on the local administration listener for the complete schema.
+See `/docs` on the local administration listener (port 8000) for the complete
+schema. Send JSON bodies with `Content-Type: application/json`. After activation,
+HTTP API requests require `Authorization: Bearer <JWT>`.
 
 For password-protected rooms, include `password` in activation. Persist a random
 `resume_credential` before the first activation request so retries reuse the same
 participant slot. See [protected invites](INVITES.md) for the complete admission,
 rate-limit, expiration, and reconnection contract.
 
-
-### Bundled test web client
+## Bundled test web client
 
 The dependency-free client at `/client` can activate invite links and exchange
 encrypted messages with another copy of itself. It uses browser Web Crypto with
@@ -24,17 +25,10 @@ Use it on `localhost` or behind HTTPS. It is intended for testing, has not been
 independently audited, and its envelope format is not compatible with NaCl
 `crypto_box` clients without an interoperability layer.
 
-To test a personal chat, create an invite in the admin UI, then open its landing
-page once in a normal browser window and once in a private window. Activate each
-side with a different display name, compare the full peer fingerprints out of
-band, and send a message. Use **Reset device** when finished; resetting destroys
-the local private key and makes that browser identity unrecoverable.
+For a two-browser walkthrough, see [local setup](../README.md#run-locally).
+Invite links use `/l/{token}` and open a landing page that links to `/client`.
 
-Flow: the client receives `<SIDEWORD_PUBLIC_URL>/l/<token>`, opens it in a
-compatible client, and calls HTTP. The invite landing page links to the bundled
-test client.
-
-### Activate link
+## Activate link
 
 ```
 POST /api/v1/links/{token}/activate
@@ -42,13 +36,15 @@ Content-Type: application/json
 
 {
   "public_key": "<base64, 32 bytes, X25519>",
-  "display_name": "Alice"          // optional
+  "display_name": "Alice",
+  "resume_credential": "<43-character base64url credential>"
 }
 ```
 
-Response:
+`display_name` is optional; include `password` for protected rooms. The response
+contains a client JWT, user identity, and chat participants:
 
-```json
+```text
 {
   "token": "<client JWT>",
   "user": { "public_id": "...", "public_key": "...", "key_fingerprint": "..." },
@@ -60,11 +56,12 @@ Response:
 }
 ```
 
-- Personal links allow **at most two** activations; then the link closes automatically.
+- Personal links allow **two participants**; once full, they seal against new joins.
+  Authenticated reconnects reuse the existing slot.
 - Group links share a chat and optionally seal at their participant limit.
 - If the device already sends `Authorization: Bearer ...`, activation **does not** create a new user — it adds the current user to the new chat/group.
 
-### Profile and chats
+## Profile and chats
 
 ```
 GET /api/v1/me
@@ -73,7 +70,7 @@ Authorization: Bearer <JWT>
 
 Returns the current user, chats, and each participant’s public key (used to encrypt outbound envelopes).
 
-### Send message
+## Send message
 
 ```
 POST /api/v1/chats/{chat_id}/messages
@@ -91,11 +88,12 @@ Authorization: Bearer <JWT>
 Rules:
 
 - `envelopes` must cover **exactly all** chat members except the sender.
-- `ciphertext` is opaque client-side encryption (recommended: NaCl/libsodium `crypto_box` or `crypto_secretbox` with nonce inside the blob).
+- `ciphertext` is opaque base64 data. All participants must agree on an
+  authenticated encryption format; see the security model below.
 - Max ciphertext length: `SIDEWORD_MAX_CIPHERTEXT_BYTES` (default 64 KiB).
 - `client_message_id` ties to local history and receipts.
 
-### Receive messages and receipts
+## Receive messages and receipts
 
 1. **WebSocket** (recommended):
 
@@ -118,7 +116,7 @@ Rules:
 
    Returns `messages` and `read_receipts` arrays.
 
-### Mark read
+## Mark read
 
 ```
 POST /api/v1/chats/{chat_id}/read
@@ -127,7 +125,10 @@ POST /api/v1/chats/{chat_id}/read
 
 The ciphertext row is removed from the server. A read receipt is created for the sender (poll/ws); after ACK it is deleted.
 
-### Acknowledge server-side deletion
+## Acknowledge server-side deletion
+
+Authenticate, decrypt, and persist messages locally before acknowledging them.
+Keep failures retryable and serialize incoming processing.
 
 ```
 POST /api/v1/ack
@@ -137,17 +138,17 @@ POST /api/v1/ack
 }
 ```
 
-After ACK, rows are gone from the server.
+After ACK, rows are gone from the server. SQLite row IDs may be reused: deduplicate
+messages by chat, sender, and client message ID; receipts by chat, reader, and
+client message ID. Treat timestamps without a timezone as UTC when ordering history.
 
-### Drop own undelivered messages
+## Drop own undelivered messages
 
 ```
 DELETE /api/v1/chats/{chat_id}/outbox
 ```
 
 Deletes pending ciphertext your user sent that recipients have not read yet.
-
----
 
 ## Message security model
 
@@ -164,5 +165,3 @@ ciphertext envelope as opaque base64 data. Production clients must agree on an
 authenticated envelope format. The bundled test client uses
 `X25519-2DH + HKDF-SHA-256 + AES-256-GCM`; NaCl/libsodium clients may instead use
 `crypto_box` when all participants use that format.
-
----

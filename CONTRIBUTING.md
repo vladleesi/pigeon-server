@@ -1,53 +1,32 @@
-# Contributing to Sideword Server
+# Contributing
 
-Thanks for helping improve Sideword Server. The project welcomes focused bug
-fixes, tests, documentation, and well-scoped feature proposals.
-
-## Before you start
-
-- Search existing issues before opening a new one.
-- Use an issue to discuss significant API, storage, or protocol changes first.
-- Do not open public issues for vulnerabilities; follow `SECURITY.md`.
-- Keep pull requests focused. Unrelated refactors should be separate changes.
+Keep changes focused. Search existing issues and discuss significant API,
+storage, or protocol changes before implementation. Report vulnerabilities
+privately using the [security policy](SECURITY.md).
 
 ## Development setup
 
-Python 3.12 or newer is supported.
+Follow the [local setup](README.md#run-locally), then install development
+dependencies. Frontend checks require Node.js 22.
 
-```bash
-git clone https://github.com/YOUR-USER/sideword-chat-server.git
-cd sideword-chat-server
-git switch -c feature/your-change
-python -m venv .venv
-```
-
-Activate the environment and install development dependencies:
-
-```bash
-# Linux/macOS
-source .venv/bin/activate
-
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-
+```sh
+git switch develop
 python -m pip install -r requirements-dev.txt
 ```
 
-Create local configuration:
+If `develop` does not exist in a fresh checkout, create it with
+`git switch -c develop`. Make changes on `develop`, never directly on `main`.
+For contributions from a fork, clone your fork in the setup step.
 
-```bash
-cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(64))"
-```
+For automatic reload, run `uvicorn app.main:app --reload` instead of the shared
+runner. This single listener includes admin routes; keep it local.
+Never commit `.env`, credentials, invite tokens, databases, or exports.
 
-Put the generated value in `SIDEWORD_SECRET_KEY`, then update the local admin
-credentials in `.env`. Never commit `.env`, databases, exports, or credentials.
+## Checks
 
-## Quality checks
+Run the same checks as CI, using isolated test databases:
 
-Run the same checks used by CI:
-
-```bash
+```sh
 python -m pip check
 python -m ruff check .
 python -m compileall -q app scripts tests
@@ -57,22 +36,31 @@ node --check app/static/link-form.js
 node --check app/static/admin-links.js
 node --check app/static/invite-vault.js
 node --test tests/client_delivery.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
-```
-
-For changes affecting deployment, also build the image:
-
-```bash
 docker build -t sideword-chat-server:test .
 ```
 
-## Pull requests
+Add tests for behavioral changes and update affected documentation. Keep the
+`docs/` landing page current when capabilities, API contracts, security, or
+deployment instructions change.
 
-1. Fork the repository and create a feature or fix branch. Do not work directly on `main`.
-2. Add tests for behavioral changes.
-3. Update documentation when configuration or API behavior changes.
-4. Run all quality checks.
-5. Open a pull request explaining the problem, solution, and validation.
-6. For releases, update `app/version.py` and `CHANGELOG.md`. Merge into `main` only after all checks pass for the exact commit.
+## Pull requests and releases
 
-By contributing, you agree that your contribution is licensed under the MIT
-License covering this repository.
+Open a pull request targeting `main` that describes the problem, change, and
+validation. Use concise Conventional Commit subjects, such as `fix: handle expired invites`.
+
+CI checks pushes to every branch except `main` and pull requests targeting
+`main`. After both check jobs pass on the exact `develop` commit, GitHub Actions
+promotes it to `main`. Other branches and pull requests run checks only.
+Never push `main` locally. If history diverges, integrate on `develop` and rerun
+checks; outdated runs are skipped. Repository rules must allow the promotion
+job's `GITHUB_TOKEN` to push with `contents: write`.
+
+For a release, update `app/version.py` and [CHANGELOG.md](CHANGELOG.md), then tag
+the promoted commit as `vX.Y.Z`. Use patch versions for fixes, minor versions
+for features or pre-1.0 breaking changes, and major versions for stable breaking
+changes. The backend version is exposed in `/health` and OpenAPI; API `/api/v1`
+and encryption envelope versions are independent. Promotion does not deploy
+the backend; [landing-page publishing](docs/DEPLOYMENT.md#landing-page) is separate.
+
+Contributions use the project's [MIT license](LICENSE). Follow the
+[code of conduct](CODE_OF_CONDUCT.md).

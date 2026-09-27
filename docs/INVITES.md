@@ -1,62 +1,65 @@
-# Protected invites
+# Invites
 
+## Create and share
 
-In **Admin → Invite links → Create link**, choose **Generated password** or
-**Custom phrase**. New custom values are 8–32 characters and are matched
-exactly, including whitespace and case. Generated passwords are 16 characters (96 random bits). Both generated and custom
-passwords are shown in the creation panel. The latest invite is saved encrypted
-with AES-GCM in browser IndexedDB using a non-exportable key, with only a random
-record ID in sessionStorage. It survives refreshes in the same tab for up to 24
-hours; closing the tab or clearing browser data can lose recovery. Expired records
-are purged when invite storage is next accessed. Share the password separately
-from the invitation URL. No plaintext room password is stored, exported, placed
-in a URL, or saved in plaintext by the browser client.
+In **Admin > Invite links > Create link**, choose a personal or group room:
 
-The authentication design is **HTTPS plus a salted scrypt verifier**, using the
-standard library's OpenSSL-backed scrypt implementation with N=2^17, r=8, p=1,
-a 16-byte random salt, and a 32-byte result. This follows the
+- Personal rooms have two participant slots.
+- Groups can have a limit of 2-1000 participants or remain unlimited.
+- Choose no password, a generated 16-character password, or a custom phrase
+  of 8-32 characters. Custom phrases match exactly, including case and whitespace.
+
+The creator occupies a slot only after joining. Share passwords separately from
+invite links. Only explicit activation claims a slot; opening a page or a link
+preview does not.
+
+The latest protected invite is saved encrypted in the same browser tab for up to
+24 hours. Refreshes preserve it; closing the tab or clearing browser data can
+lose it. Storage uses AES-GCM with a non-exportable IndexedDB key and a random
+record ID in sessionStorage. Expired records are purged on the next access.
+Passwords are never stored or exported in plaintext, or included in URLs.
+
+## Join and reconnect
+
+Call `POST /api/v1/links/{token}/activate` with `public_key`, optional
+`display_name`, and `password` for a protected room. See the [API guide](API.md).
+
+Before the first request, persist a separate random 32-byte `resume_credential`
+for that invite, encoded as unpadded base64url (43 characters), alongside the
+device identity. Retrying with it and the same public key reuses the participant
+slot, even if the first response was lost. The server stores only its SHA-256
+digest. The bundled client handles this automatically.
+
+An existing valid bearer JWT can also reconnect without another password or
+slot. A public key alone cannot authorize reconnecting. Losing both credentials
+and the session does not free an occupied slot.
+
+Admission uses a SQLite `BEGIN IMMEDIATE` transaction to prevent concurrent
+joins from overfilling rooms. Full rooms seal against new participants while
+existing participants can reconnect. Explicit revocation, deletion, participant
+deactivation, and expiry invalidate access; a password or resume credential
+cannot reopen an expired room.
+
+## Password security
+
+Protected creation and joining require HTTPS, except direct loopback development.
+Follow the [deployment guide](DEPLOYMENT.md#public-access) for proxy configuration.
+
+Passwords use server verification with salted scrypt, not PAKE. The application
+server and TLS terminator see submitted passwords in memory and must be trusted.
+Do not enable request-body logging. Passwords gate admission; they are not message
+encryption keys and do not replace out-of-band peer key verification.
+
+The implementation uses OpenSSL-backed scrypt with N=2^17, r=8, p=1, a random
+16-byte salt, and a 32-byte result, following the
 [OWASP scrypt profile](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
-It is a server-verified alternative, **not PAKE**: the application server and TLS
-terminator (including a tunnel provider) see submitted passwords in memory and
-must be trusted. It does not protect against a malicious server or replace peer
-key verification. Passwords gate admission; they are not message encryption keys.
-Do not enable request-body logging at the application or proxy.
+Generated passwords contain 96 random bits.
 
-Protected creation and joining require HTTPS, except direct local loopback for
-development. Configure the server to trust forwarded scheme headers only from
-your actual reverse proxy; arbitrary forwarded headers are not accepted by the
-application. Keep the shared public tunnel on port 8001 so administration stays
-local. Existing message encryption and non-exportable browser keys are unchanged.
+Failed guesses are limited to five per invite per five-minute fixed window,
+persisted in SQLite. Further attempts return 429 with `Retry-After`; changing IP
+addresses does not reset the limit. Anyone with an invite can temporarily exhaust
+its guess budget, but authenticated reconnects remain available.
 
-Only an explicit `POST /api/v1/links/{token}/activate` can claim a slot. Include
-`public_key`, optional `display_name`, and `password` for a protected room. GETs,
-previews, page refreshes, and opening the browser client never claim slots.
-Personal rooms have exactly two slots. Groups optionally accept a participant
-limit of 2–1000; without a limit they remain open. The creator counts as a
-participant only when they explicitly join.
-
-Clients should generate a separate 32-byte cryptographically random bearer
-`resume_credential` per invite, encode it as unpadded base64url (43 characters),
-and persist it with their device identity **before** the first activation POST.
-The bundled browser client does this automatically. Retrying with that credential
-and the same public key returns the same participant even if the original HTTP
-response was lost. Only its SHA-256 digest is stored on the server. An existing
-valid bearer JWT can also reconnect without another password or slot. A public
-key alone never authorizes reconnection. Losing both the browser's credentials
-and its session does not free a sealed slot.
-
-Admission runs under a SQLite `BEGIN IMMEDIATE` transaction, so concurrent joins
-and multiple server processes cannot overfill rooms. Once the limit is reached,
-the invitation seals against new participants while existing participants can
-reconnect. Explicit revocation, deletion, participant deactivation, and expiry
-still invalidate access. Failed guesses are limited to five per invite per
-five-minute fixed window, persisted in SQLite; subsequent attempts return 429
-with `Retry-After`. Rotating IP addresses does not reset this limit. Someone with
-an invite can temporarily exhaust its guess budget; authenticated reconnects
-remain available.
-
-Startup adds nullable verifiers and retry metadata to existing databases without
-changing unprotected invites. Administrative exports preserve verifiers and retry
-metadata, never plaintext passwords; treat these backups as sensitive. Existing
-expiration checks apply to both admission and resumption, so temporary rooms
-cannot be reopened with a password or retry credential after their deadline.
+Startup adds password and retry metadata without changing unprotected invites.
+Admin exports preserve verifiers and retry metadata, never plaintext passwords;
+see [backups](UPGRADING.md#backups).
