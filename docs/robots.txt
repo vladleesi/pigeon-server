@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://vladleesi.dev/sideword-server/sitemap.xml

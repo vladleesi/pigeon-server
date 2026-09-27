@@ -1,41 +1,24 @@
+/* Sideword palette. Layout and component dimensions remain unchanged. */
 :root {
-  color-scheme: light dark;
-  --bg: #f7f7fb;
-  --surface: #fff;
-  --surface-alt: #eef1fb;
-  --text: #111217;
-  --muted: #6b6f7a;
-  --border: #e4e6ee;
-  --accent: #3a5bd9;
-  --accent-hover: #304fc4;
-  --accent-text: #fff;
-  --danger: #a73a32;
-  --warning-bg: #eef1fb;
-  --warning-text: #4c5364;
-  --mine: #e5eafe;
-  --theirs: #f1f2f6;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  color-scheme: dark;
+  --bg: #070B12;
+  --surface: #0D1420;
+  --surface-alt: #121C2A;
+  --text: #F7FAFF;
+  --muted: #8D9BAD;
+  --border: #1D2A3A;
+  --accent: #2F7CFF;
+  --accent-hover: #4A8DFF;
+  --cyan: #19D3FF;
+  --success: #35D99A;
+  --danger: #FF5570;
+  --accent-text: var(--bg);
+  --warning-bg: var(--surface-alt);
+  --warning-text: var(--muted);
+  --mine: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --theirs: var(--surface-alt);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1117;
-    --surface: #171a22;
-    --surface-alt: #222633;
-    --text: #e7e9f0;
-    --muted: #9aa0ae;
-    --border: #262a36;
-    --accent: #7893f5;
-    --accent-hover: #8da5f7;
-    --accent-text: #0b0d14;
-    --danger: #ff9188;
-    --warning-bg: #222633;
-    --warning-text: #b7bdca;
-    --mine: #29385f;
-    --theirs: #222633;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  }
 }
 
 * { box-sizing: border-box; }
@@ -75,7 +58,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 }
 .identity-line { display: flex; align-items: center; gap: 0.55rem; color: var(--muted); font-size: 0.88rem; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.status-dot.online { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
+.status-dot.online { background: var(--success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 15%, transparent); }
 .client-shell { width: min(1120px, calc(100% - 2rem)); margin: 1.25rem auto; }
 
 .security-notice {
@@ -173,7 +156,7 @@ textarea { resize: vertical; min-height: 48px; max-height: 180px; }
 .composer { padding: 0.85rem; display: grid; grid-template-columns: 1fr auto; gap: 0.65rem; align-items: end; border-top: 1px solid var(--border); }
 .composer .button { min-height: 48px; }
 .toast { position: fixed; right: 1rem; bottom: 1rem; max-width: min(420px, calc(100% - 2rem)); padding: 0.8rem 1rem; border-radius: 10px; background: var(--text); color: var(--surface); box-shadow: var(--shadow); }
-.toast.error { background: var(--danger); color: #fff; }
+.toast.error { background: var(--danger); color: var(--bg); }
 .client-footer { padding: 0.5rem 1rem 1.5rem; color: var(--muted); text-align: center; font-size: 0.78rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

@@ -133,6 +133,48 @@ docker compose exec sideword python -m scripts.export_config --output /exports/s
 Back up the database before upgrading and follow the
 [upgrade steps](docs/UPGRADING.md). Startup applies additive SQLite schema migrations.
 
+## Static landing page
+
+The independent landing site is `docs/index.html`, with `site.css` and `mark.svg`.
+It uses no executable JavaScript, fonts from third parties, dependencies, or build step.
+Static JSON-LD describes the site and source repository for crawlers.
+Preview it with `python -m http.server 8080 --bind 127.0.0.1 --directory docs`,
+then open `http://127.0.0.1:8080`. Its relative assets work under a Pages project path.
+The setup CTA links to this repository; GitHub Pages does not host the chat backend.
+
+After changes reach `main`, choose a publishing method in **Settings → Pages**:
+
+- **Deploy from a branch**: select `main` and `/docs`, then save. GitHub publishes
+  the whole folder, including its public Markdown documentation. Subsequent eligible
+  pushes rebuild the site; this is not a manual-only deployment mode.
+- **GitHub Actions** (optional): run **Actions → Publish landing page → Run workflow**
+  on `main`. The included workflow is manual-only and uploads only the static site
+  assets, metadata, and crawler files.
+
+The existing promotion job pushes with `GITHUB_TOKEN`, which does not trigger a
+branch-based Pages build. Use the optional manual workflow when publishing those
+updates. See [GitHub's publishing-source documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
+No repository settings are changed automatically. For a custom domain, configure
+it in Pages settings and update DNS as GitHub instructs, then update the absolute
+metadata URLs described below.
+
+### Search and link previews
+
+The landing page includes a canonical URL, Open Graph/X preview metadata, a PNG
+social card, JSON-LD, and a one-page sitemap. The configured public URL is
+`https://vladleesi.dev/sideword-server/`. Before using a different domain or
+repository path, update the absolute URLs in `docs/index.html`, `docs/sitemap.xml`,
+and `docs/robots.txt`. Preview images must be publicly accessible after deployment.
+
+Submit the deployed `sitemap.xml` URL in Google Search Console or Bing Webmaster
+Tools if desired; these files do not submit the site or guarantee indexing.
+`robots.txt` is effective only at the origin root: on a project Pages URL it is
+under a subdirectory and is not used by crawlers. Manage the host-root robots file
+separately, or use a custom domain where these files are served at the root.
+The page-level robots tag still allows indexing. See
+[Google's robots.txt placement rules](https://developers.google.com/crawling/docs/robots-txt/create-robots-txt).
+These files describe the public landing site, not private chats or invite URLs.
+
 ## Development and releases
 
 Make changes on a feature or fix branch, never directly on `main`. GitHub Actions
