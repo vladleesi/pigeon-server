@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Sideword test client</title>
-  <link rel="stylesheet" href="/static/client.css?v=4">
-  <script src="/static/client.js?v=9" defer></script>
+  <link rel="stylesheet" href="/static/client.css?v=5">
+  <script src="/static/client-protocol.js?v=1" defer></script>
+  <script src="/static/client.js?v=10" defer></script>
 </head>
 <body>
   <header class="client-header">
@@ -79,6 +80,7 @@
             <p id="conversation-kind" class="eyebrow">Select a chat</p>
             <h2 id="conversation-title">No conversation selected</h2>
             <p id="participant-keys" class="key-line"></p>
+            <p class="key-line">Compare each full fingerprint with its owner over a separate trusted channel. First-use key pinning is not identity verification. Changed keys block messaging.</p>
           </div>
           <span id="participant-count" class="muted"></span>
         </div>

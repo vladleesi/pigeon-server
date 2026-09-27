@@ -129,7 +129,7 @@ textarea { resize: vertical; min-height: 48px; max-height: 180px; }
   border-bottom: 1px solid var(--border);
 }
 .panel-heading p, .conversation-heading p { margin-bottom: 0.2rem; }
-.key-line { margin: 0.3rem 0 0; color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.7rem; }
+.key-line { margin: 0.3rem 0 0; color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.7rem; overflow-wrap: anywhere; }
 .chat-list { padding: 0.55rem; }
 .chat-button {
   width: 100%;

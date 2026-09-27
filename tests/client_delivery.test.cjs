@@ -12,6 +12,7 @@ function client() {
     window: { addEventListener() {} },
   });
   const source = fs.readFileSync('app/static/client.js', 'utf8');
+  vm.runInContext(fs.readFileSync('app/static/client-protocol.js', 'utf8'), context);
   vm.runInContext(source.replace(/start\(\)\.catch[^\n]+/, ''), context);
   vm.runInContext(`
     senderKeyIsLoaded = () => true;

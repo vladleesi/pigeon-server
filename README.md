@@ -126,6 +126,12 @@ shared runner; update `SIDEWORD_PUBLIC_URL` and restart the backend whenever its
 public origin changes. A named tunnel with a personal domain provides a stable
 address. Keep tunnel addresses and credentials out of version control.
 
+The shared runner disables raw access logs because invite paths and legacy
+WebSocket query strings contain credentials. Configure equivalent redaction or
+suppression in reverse proxies, tunnels, and standalone Uvicorn/Docker deployments
+(Uvicorn: `--no-access-log --log-level warning`); never log request bodies, cookies, or authorization
+headers. Limit backup and export retention separately from message TTL.
+
 ## Invites and chats
 
 In **Admin > Invite links > Create link**, choose a personal room with two
@@ -147,6 +153,13 @@ device** permanently removes them. The latest protected invite is saved encrypte
 in the same tab for up to 24 hours, including across refreshes, but closing the
 tab or clearing browser data can lose it.
 
+The test client calculates full fingerprints locally and pins the first key for
+each peer. Later key changes block encryption and decryption without removing
+history. First-use pinning does not authenticate the initial key or protect
+against malicious JavaScript served by the origin. The v1 protocol has no
+recipient forward secrecy or post-compromise recovery; see the
+[security review and migration plan](docs/SECURITY_REVIEW.md).
+
 Room passwords use salted scrypt verification over HTTPS. The application server
 and TLS terminator see submitted passwords in memory and must be trusted;
 avoid request-body logging. Passwords control admission and do not replace
@@ -158,6 +171,7 @@ for activation, retry credentials, and the detailed security contract.
 ## Further documentation
 
 - [Client API](docs/API.md) explains encryption, delivery, and acknowledgement rules.
+- [Browser protocol](docs/PROTOCOL.md) defines v1 interoperability and client responsibilities.
 - [Backups and upgrades](docs/UPGRADING.md) covers configuration exports, storage, and migrations.
 - [Contributing](CONTRIBUTING.md) covers development setup, checks, and releases.
 - [Changelog](CHANGELOG.md), [Security](SECURITY.md), [Code of conduct](CODE_OF_CONDUCT.md), and [MIT license](LICENSE).

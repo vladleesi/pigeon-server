@@ -27,3 +27,8 @@ complexity.
 - Client applications are responsible for generating keys and encrypting message
   payloads correctly.
 - The project has not undergone an independent security audit.
+- The test-client v1 protocol has no recipient forward secrecy or post-compromise
+  recovery. Local first-use key pinning cannot authenticate an initial key or
+  protect against malicious code delivered by the server.
+- See the [security review and migration plan](docs/SECURITY_REVIEW.md) and
+  [v1 protocol contract](docs/PROTOCOL.md) for boundaries and remaining risks.

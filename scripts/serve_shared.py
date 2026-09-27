@@ -29,9 +29,15 @@ class PublicListener:
 
 async def main():
     app = create_app()
-    local = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000))
+    # Invite paths and legacy WebSocket query strings contain credentials.
+    # Uvicorn also logs WS URLs at INFO on uvicorn.error, independently of its
+    # access_log option. Preserve warnings/errors and application error logging.
+    local = uvicorn.Server(uvicorn.Config(
+        app, host="127.0.0.1", port=8000, access_log=False, log_level="warning",
+    ))
     public = uvicorn.Server(uvicorn.Config(
         PublicListener(app), host="127.0.0.1", port=8001, lifespan="off",
+        access_log=False, log_level="warning",
     ))
     await asyncio.gather(local.serve(), public.serve())
 

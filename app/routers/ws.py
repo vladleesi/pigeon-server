@@ -20,6 +20,7 @@ router = APIRouter()
 
 _BASE_PROTOCOL = "sideword.v1"
 _AUTH_PROTOCOL_PREFIX = "sideword.auth."
+SESSION_CHECK_SECONDS = 30
 
 
 def _token_from_subprotocol(websocket: WebSocket) -> str | None:
@@ -113,23 +114,30 @@ async def ws_endpoint(websocket: WebSocket, token: str | None = Query(default=No
 
         if websocket.application_state.name != "CONNECTED":
             await websocket.accept(subprotocol=accepted_protocol)
-        await manager.connect(user.id, websocket)
+        async def validate_session() -> bool:
+            # A fresh session avoids stale ORM state after remote revocation.
+            async with SessionLocal() as current:
+                return await _resolve_user(current, auth_token) is not None
 
-        messages, receipts = await _backlog_payload(session, user)
-
-        # Backlog rows are treated as delivered once streamed down.
-        if messages:
-            ids = [m.id for m in messages]
-            pending_rows = await session.execute(
-                select(PendingMessage).where(PendingMessage.id.in_(ids))
-            )
-            now = datetime.now(timezone.utc)
-            for row in pending_rows.scalars().all():
-                if row.delivered_at is None:
-                    row.delivered_at = now
-            await session.commit()
+        await manager.connect(user.id, websocket, validate_session)
 
         try:
+            messages, receipts = await _backlog_payload(session, user)
+
+            # Backlog rows are treated as delivered once streamed down.
+            if messages:
+                ids = [m.id for m in messages]
+                pending_rows = await session.execute(
+                    select(PendingMessage).where(PendingMessage.id.in_(ids))
+                )
+                now = datetime.now(timezone.utc)
+                for row in pending_rows.scalars().all():
+                    if row.delivered_at is None:
+                        row.delivered_at = now
+                await session.commit()
+
+            if not await manager.validate(user.id, websocket):
+                return
             await websocket.send_json(
                 {
                     "type": "hello",
@@ -143,19 +151,22 @@ async def ws_endpoint(websocket: WebSocket, token: str | None = Query(default=No
         except WebSocketDisconnect:
             await manager.disconnect(user.id, websocket)
             return
+        except BaseException:
+            await manager.disconnect(user.id, websocket)
+            raise
 
     try:
         while True:
             # Clients may send ping frames; accept simple textual pings too.
-            raw = await websocket.receive_text()
+            try:
+                raw = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=SESSION_CHECK_SECONDS
+                )
+            except TimeoutError:
+                raw = None
+            if not await manager.validate(user.id, websocket):
+                return
             if raw == "ping":
-                async with SessionLocal() as session:
-                    if await _resolve_user(session, auth_token) is None:
-                        await websocket.send_json(
-                            {"type": "auth_error", "reason": "invalid session"}
-                        )
-                        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                        return
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         pass

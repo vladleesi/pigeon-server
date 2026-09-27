@@ -14,9 +14,13 @@ room limits, password handling, expiration, and browser use.
 The dependency-free client at `/client` can activate invite links and exchange
 encrypted messages with another copy of itself. It uses browser Web Crypto with
 a sender-static plus ephemeral X25519 construction, HKDF-SHA-256, and
-AES-256-GCM. Peer key fingerprints are shown for out-of-band verification. Its
-private key is stored as a
-non-exportable `CryptoKey` in IndexedDB. Local history is encrypted with a
+AES-256-GCM. Fingerprints are calculated locally for out-of-band verification;
+the first observed peer key is pinned locally and later changes block use. This
+is trust on first use, not protection against initial substitution or malicious
+server-delivered JavaScript. The protocol has no recipient forward secrecy or
+post-compromise recovery. See the [v1 wire contract](PROTOCOL.md) and
+[security review / migration plan](SECURITY_REVIEW.md). Its private key is stored
+as a non-exportable `CryptoKey` in IndexedDB. Local history is encrypted with a
 separate non-exportable AES-GCM key and survives page refreshes until **Reset
 device** is used. The page ships with a restrictive Content Security Policy and
 does not load third-party code.
@@ -184,12 +188,18 @@ Deletes pending ciphertext your user sent that recipients have not read yet.
 | --- | --- | --- |
 | Transport | Passive sniffing, basic MITM on connections | HTTPS/WSS (reverse proxy) |
 | Payload | Server, admins, DB leaks | E2E on clients; server stores/forwards only `ciphertext` |
-| Identity | Wrong peer keys | Clients show `key_fingerprint` for each participant — verify out-of-band |
+| Identity | Later changes to a known peer key | Test client computes SHA-256 fingerprints locally and pins first use; verify full fingerprints out-of-band |
 | Retention | Permanent archive | Server deletes after ACK; TTL purge for stale pending (default 30 days) |
-| Session | Lost device | Expiring JWT bound to an active invite |
+| Session | Continued access after expiry/revocation | Expiring JWT bound to a valid invite; HTTP checks and WS checks before pushes and while idle |
 
 The server contract requires a 32-byte base64 X25519 public key and treats each
 ciphertext envelope as opaque base64 data. Production clients must agree on an
 authenticated envelope format. The bundled test client uses
 `X25519-2DH + HKDF-SHA-256 + AES-256-GCM`; NaCl/libsodium clients may instead use
 `crypto_box` when all participants use that format.
+
+The server's `key_fingerprint` is a convenience field, not an independent trust
+anchor. Neither protocol v1 nor `crypto_box` provides a session ratchet. A server
+that substitutes keys before first use or serves malicious client code remains
+outside the protection of local pinning. Default JWT lifetimes are unchanged;
+the [review](SECURITY_REVIEW.md) describes renewal and migration requirements.

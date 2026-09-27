@@ -36,3 +36,19 @@ Startup applies additive SQLite schema migrations. Keep the backup until the
 upgrade is verified. Backend release numbers, API `/api/v1`, and browser
 encryption format versions are independent; see [contributing](../CONTRIBUTING.md#pull-requests-and-releases)
 for the release process.
+
+## Client security hardening (v1-compatible)
+
+The protocol module must be deployed alongside `client.js` and `client.html`.
+Reload the client to load both scripts. No server schema, identity key, JWT,
+invite credential, ciphertext, or local-history migration is required. New
+`peer:` records hold local first-use fingerprint pins in the existing IndexedDB
+store. Older client code ignores them; rolling back loses pin enforcement.
+Verify existing peers out of band on the first upgraded use. Unexpected changed
+keys block use; do not reset the device or delete history to dismiss the warning.
+
+WS sessions are now checked before delivery and periodically while idle. Expired
+or revoked credentials may therefore disconnect earlier than with the old client
+ping-dependent behavior. Supported authentication transports and default TTLs
+are unchanged. See [security review](SECURITY_REVIEW.md) for the separate ratchet
+and renewable-session migration plan.

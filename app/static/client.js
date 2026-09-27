@@ -52,16 +52,7 @@ const pendingReadsByChat = new Map();
 const pendingReceiptIds = new Set();
 
 function bytesToBase64(bytes) {
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(value) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return SidewordProtocol.bytesToBase64(bytes);
 }
 
 function openDatabase() {
@@ -111,22 +102,14 @@ async function clearIdentity() {
 }
 
 async function generateIdentity() {
-  const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
+  const pair = await crypto.subtle.generateKey({ name: "X25519" }, false, ["deriveBits"]);
   const publicKey = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
-  const privatePkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    privatePkcs8,
-    { name: "X25519" },
-    false,
-    ["deriveBits"],
-  );
+  const privateKey = pair.privateKey;
   const storageKey = await crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
-  new Uint8Array(privatePkcs8).fill(0);
   return {
     privateKey,
     publicKey: bytesToBase64(publicKey),
@@ -159,8 +142,47 @@ async function putDatabaseValue(key, value) {
       database.close();
       resolve();
     };
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = transaction.onerror = () => {
+      database.close();
+      reject(transaction.error || new Error("Local history transaction aborted."));
+    };
   });
+}
+
+async function observePeerKey(peer) {
+  const fingerprint = await SidewordProtocol.publicKeyFingerprint(peer.public_key);
+  if (peer.public_id === identity.publicId) {
+    const ownFingerprint = await SidewordProtocol.publicKeyFingerprint(identity.publicKey);
+    return { ...peer, local_fingerprint: ownFingerprint, key_changed: ownFingerprint !== fingerprint };
+  }
+  const key = `peer:${identity.publicKey}:${peer.public_id}`;
+  const database = await openDatabase();
+  const pinned = await new Promise((resolve, reject) => {
+    // Atomic read/check/insert: another tab must not overwrite a first-use pin.
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(key);
+    let value;
+    request.onsuccess = () => {
+      value = request.result;
+      if (value === undefined) {
+        value = fingerprint;
+        store.put(value, key);
+      }
+    };
+    transaction.oncomplete = () => { database.close(); resolve(value); };
+    transaction.onabort = transaction.onerror = () => {
+      database.close();
+      reject(transaction.error || new Error("Could not save peer key."));
+    };
+  });
+  return { ...peer, local_fingerprint: fingerprint, key_changed: pinned !== fingerprint };
+}
+
+async function assertTrustedPeer(peer) {
+  if ((await observePeerKey(peer)).key_changed) {
+    throw new Error(`Peer ${peer.public_id} key changed. Sending and decryption blocked. Verify out of band; keep this device's history.`);
+  }
 }
 
 async function readHistoryRecords() {
@@ -210,7 +232,9 @@ async function clearStoredHistory() {
 }
 
 async function persistHistoryEntry(chatId, entry) {
-  if (!identity?.storageKey || !identity.publicId || !entry.id) return;
+  if (!identity?.storageKey || !identity.publicId || !entry.id) {
+    throw new Error("Local history storage is unavailable. Message retained for retry.");
+  }
   const key = historyKey(chatId, entry.id);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
@@ -315,116 +339,17 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function envelopeContext(chatId, messageId, senderId, recipientId) {
-  return encoder.encode(`sideword-web-v1|${chatId}|${messageId}|${senderId}|${recipientId}`);
-}
-
-async function deriveSharedSecret(privateKey, publicKey) {
-  return new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "X25519", public: publicKey },
-    privateKey,
-    256,
-  ));
-}
-
-async function deriveMessageKey(sharedSecret, salt, info, usage) {
-  const material = await crypto.subtle.importKey("raw", sharedSecret, "HKDF", false, ["deriveKey"]);
-  sharedSecret.fill(0);
-  return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt, info },
-    material,
-    { name: "AES-GCM", length: 256 },
-    false,
-    [usage],
-  );
-}
-
 async function encryptForRecipient(plaintext, chatId, messageId, recipient) {
-  const ephemeral = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
-  const recipientKey = await crypto.subtle.importKey(
-    "raw",
-    base64ToBytes(recipient.public_key),
-    { name: "X25519" },
-    false,
-    [],
-  );
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const info = envelopeContext(chatId, messageId, identity.publicId, recipient.public_id);
-  const staticSecret = await deriveSharedSecret(identity.privateKey, recipientKey);
-  const ephemeralSecret = await deriveSharedSecret(ephemeral.privateKey, recipientKey);
-  const combinedSecret = new Uint8Array(staticSecret.length + ephemeralSecret.length);
-  combinedSecret.set(staticSecret);
-  combinedSecret.set(ephemeralSecret, staticSecret.length);
-  staticSecret.fill(0);
-  ephemeralSecret.fill(0);
-  const key = await deriveMessageKey(combinedSecret, salt, info, "encrypt");
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: info, tagLength: 128 },
-    key,
-    encoder.encode(plaintext),
-  );
-  const ephemeralPublicKey = await crypto.subtle.exportKey("raw", ephemeral.publicKey);
-  const envelope = {
-    v: 1,
-    alg: "X25519-2DH-HKDF-SHA256-AES256GCM",
-    epk: bytesToBase64(new Uint8Array(ephemeralPublicKey)),
-    salt: bytesToBase64(salt),
-    iv: bytesToBase64(iv),
-    ct: bytesToBase64(new Uint8Array(ciphertext)),
-  };
-  return bytesToBase64(encoder.encode(JSON.stringify(envelope)));
+  await assertTrustedPeer(recipient);
+  return SidewordProtocol.encryptForRecipient(identity, plaintext, chatId, messageId, recipient);
 }
 
 async function decryptMessage(message) {
-  const envelope = JSON.parse(decoder.decode(base64ToBytes(message.ciphertext)));
-  if (envelope.v !== 1 || envelope.alg !== "X25519-2DH-HKDF-SHA256-AES256GCM") {
-    throw new Error("Unsupported ciphertext format.");
-  }
-  const chat = chats.find((candidate) => candidate.id === message.chat_id);
-  const sender = chat?.participants.find(
-    (participant) => participant.public_id === message.sender_public_id,
-  );
+  const chat = chats.find(candidate => candidate.id === message.chat_id);
+  const sender = chat?.participants.find(peer => peer.public_id === message.sender_public_id);
   if (!sender) throw new Error("Sender key is not present in this chat.");
-  const senderKey = await crypto.subtle.importKey(
-    "raw",
-    base64ToBytes(sender.public_key),
-    { name: "X25519" },
-    false,
-    [],
-  );
-  const ephemeralKey = await crypto.subtle.importKey(
-    "raw",
-    base64ToBytes(envelope.epk),
-    { name: "X25519" },
-    false,
-    [],
-  );
-  const info = envelopeContext(
-    message.chat_id,
-    message.client_message_id,
-    message.sender_public_id,
-    identity.publicId,
-  );
-  const staticSecret = await deriveSharedSecret(identity.privateKey, senderKey);
-  const ephemeralSecret = await deriveSharedSecret(identity.privateKey, ephemeralKey);
-  const combinedSecret = new Uint8Array(staticSecret.length + ephemeralSecret.length);
-  combinedSecret.set(staticSecret);
-  combinedSecret.set(ephemeralSecret, staticSecret.length);
-  staticSecret.fill(0);
-  ephemeralSecret.fill(0);
-  const key = await deriveMessageKey(combinedSecret, base64ToBytes(envelope.salt), info, "decrypt");
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: base64ToBytes(envelope.iv),
-      additionalData: info,
-      tagLength: 128,
-    },
-    key,
-    base64ToBytes(envelope.ct),
-  );
-  return decoder.decode(plaintext);
+  await assertTrustedPeer(sender);
+  return SidewordProtocol.decryptMessage(identity, message, sender);
 }
 
 async function appendMessage(chatId, entry, persist = true) {
@@ -532,11 +457,15 @@ function selectChat(chatId) {
   elements.participantCount.textContent = chat ? `${chat.participants.length} participants` : "";
   elements.participantKeys.textContent = chat
     ? chat.participants
-        .filter((item) => item.public_id !== identity.publicId)
-        .map((item) => `${item.public_id}: ${item.key_fingerprint}`)
+        .map((item) => {
+          const label = item.public_id === identity.publicId ? " (this device)" : "";
+          const warning = item.key_changed ? " — KEY CHANGED; blocked" : "";
+          return `${item.public_id}${label}: ${item.local_fingerprint || "not checked"}${warning}`;
+        })
         .join(" · ")
     : "";
-  const canSend = Boolean(chat && chat.participants.some((item) => item.public_id !== identity.publicId));
+  const canSend = Boolean(chat && !chat.participants.some(item => item.key_changed)
+    && chat.participants.some((item) => item.public_id !== identity.publicId));
   elements.messageInput.disabled = !canSend;
   elements.sendButton.disabled = !canSend;
   renderChats();
@@ -568,11 +497,17 @@ async function loadChats() {
     : null;
   updateSessionCountdown();
   if (data.user.public_key !== identity.publicKey) {
-    throw new Error("Server identity does not match this device key. Reset this device.");
+    throw new Error("Server identity does not match this device key. Verify out of band; keep this device's history.");
   }
-  chats = data.chats;
+  const checkedChats = [];
+  for (const chat of data.chats) {
+    const participants = [];
+    for (const peer of chat.participants) participants.push(await observePeerKey(peer));
+    checkedChats.push({ ...chat, participants });
+  }
   identity.publicId = data.user.public_id;
   await writeIdentity(identity);
+  chats = checkedChats;
   if (selectedChatId && !chats.some((chat) => chat.id === selectedChatId)) selectedChatId = null;
   if (!selectedChatId && chats.length) selectedChatId = chats[0].id;
   renderChats();
@@ -681,7 +616,7 @@ async function synchronize() {
   synchronizing = true;
   try {
     await loadChats();
-    const data = await api(`/api/v1/poll?_=${Date.now()}`);
+    const data = await api("/api/v1/poll");
     await enqueueIncoming(() => processIncoming(data));
   } catch (error) {
     showToast(errorMessage(error), true);

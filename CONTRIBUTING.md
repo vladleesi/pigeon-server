@@ -32,10 +32,11 @@ python -m ruff check .
 python -m compileall -q app scripts tests
 python -m pytest
 node --check app/static/client.js
+node --check app/static/client-protocol.js
 node --check app/static/link-form.js
 node --check app/static/admin-links.js
 node --check app/static/invite-vault.js
-node --test tests/client_delivery.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
+node --test tests/client_delivery.test.cjs tests/client_crypto.test.cjs tests/client_identity.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
 docker build -t sideword-chat-server:test .
 ```
 

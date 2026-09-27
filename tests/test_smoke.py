@@ -108,10 +108,15 @@ async def _run() -> None:
             assert r.headers["cache-control"] == "no-store"
             assert "default-src 'none'" in r.headers["content-security-policy"]
             assert r.headers["x-frame-options"] == "DENY"
+            assert r.text.index('/static/client-protocol.js') < r.text.index('/static/client.js')
+
+            r = await c.get("/static/client-protocol.js")
+            assert r.status_code == 200
+            assert "X25519-2DH-HKDF-SHA256-AES256GCM" in r.text
 
             r = await c.get("/static/client.js")
             assert r.status_code == 200
-            assert "X25519-2DH-HKDF-SHA256-AES256GCM" in r.text
+            assert "SidewordProtocol.encryptForRecipient" in r.text
             assert "persistHistoryEntry" in r.text
             assert "compareHistoryEntries" in r.text
             assert 'type: "auth", token: identity.token' in r.text
