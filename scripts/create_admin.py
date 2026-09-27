@@ -38,7 +38,7 @@ async def _run(username: str, password: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create or update a Pigeon admin account.")
+    parser = argparse.ArgumentParser(description="Create or update a Sideword admin account.")
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", default=None, help="omit to prompt securely")
     args = parser.parse_args()

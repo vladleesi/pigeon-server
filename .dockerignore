@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.venv
+.runtime
+.cloudflared
+.tools
+AGENTS.md
+data
+exports
+**/__pycache__
+*.sqlite*
+*.db
+*.log

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Pigeon Server is pre-1.0. Security fixes are applied only to the latest code on
+Sideword Server is pre-1.0. Security fixes are applied only to the latest code on
 the `main` branch until stable releases are published.
 
 ## Reporting a vulnerability

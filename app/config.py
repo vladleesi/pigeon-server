@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="PIGEON_",
+        env_prefix="SIDEWORD_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     )
 
     db_path: str = Field(
-        default="./data/pigeon.sqlite3",
+        default="./data/sideword.sqlite3",
         description="SQLite database file path.",
     )
     exports_dir: str = Field(
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
         }
         if value in insecure_values:
             raise ValueError(
-                "PIGEON_SECRET_KEY must be replaced with a random secret"
+                "SIDEWORD_SECRET_KEY must be replaced with a random secret"
             )
         return value
 
@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     def _reject_placeholder_admin_password(self) -> "Settings":
         if self.admin_username and self.admin_password == "change-me-too":
             raise ValueError(
-                "PIGEON_ADMIN_PASSWORD must be replaced before creating an admin"
+                "SIDEWORD_ADMIN_PASSWORD must be replaced before creating an admin"
             )
         return self
 

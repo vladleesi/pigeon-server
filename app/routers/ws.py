@@ -18,8 +18,8 @@ from ..ws_manager import manager
 
 router = APIRouter()
 
-_BASE_PROTOCOL = "pigeon.v1"
-_AUTH_PROTOCOL_PREFIX = "pigeon.auth."
+_BASE_PROTOCOL = "sideword.v1"
+_AUTH_PROTOCOL_PREFIX = "sideword.auth."
 
 
 def _token_from_subprotocol(websocket: WebSocket) -> str | None:

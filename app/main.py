@@ -1,4 +1,4 @@
-"""FastAPI application entrypoint for Pigeon."""
+"""FastAPI application entrypoint for Sideword."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from .routers import (
     me,
     ws,
 )
+from .version import __version__
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,8 +54,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Pigeon Server",
-        version="0.1.0",
+        title="Sideword Server",
+        version=__version__,
         description="Link-only messenger backend API.",
         lifespan=lifespan,
     )

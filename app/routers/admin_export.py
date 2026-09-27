@@ -115,7 +115,7 @@ async def export_bundle(
     }
 
     payload = json.dumps(bundle, ensure_ascii=False, indent=2).encode("utf-8")
-    filename = f"pigeon-config-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+    filename = f"sideword-config-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
     return Response(
         content=payload,
         media_type="application/json",

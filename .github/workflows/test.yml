@@ -2,7 +2,9 @@ name: test
 
 on:
   push:
+    branches-ignore: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -38,4 +40,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --tag pigeon-server:test .
+      - run: docker build --tag sideword-server:test .

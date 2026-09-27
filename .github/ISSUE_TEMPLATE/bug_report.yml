@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Pigeon Server
+description: Report a reproducible problem in Sideword Server
 title: "[Bug]: "
 labels: [bug]
 body:

@@ -20,7 +20,7 @@ def test_placeholder_secrets_are_rejected(secret: str) -> None:
 
 
 def test_example_admin_password_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="PIGEON_ADMIN_PASSWORD must be replaced"):
+    with pytest.raises(ValidationError, match="SIDEWORD_ADMIN_PASSWORD must be replaced"):
         Settings(
             _env_file=None,
             secret_key="a-secure-enough-test-secret-that-is-long",

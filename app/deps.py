@@ -12,7 +12,7 @@ from .db import get_session
 from .models import Admin, Link, User
 from .security import decode_admin_token, decode_client_token
 
-ADMIN_COOKIE_NAME = "pigeon_admin_session"
+ADMIN_COOKIE_NAME = "sideword_admin_session"
 
 
 async def resolve_client_user(session: AsyncSession, token: str) -> User | None:
@@ -66,9 +66,9 @@ async def get_current_user(
 async def get_current_admin(
     request: Request,
     session: AsyncSession = Depends(get_session),
-    pigeon_admin_session: str | None = Cookie(default=None, alias=ADMIN_COOKIE_NAME),
+    sideword_admin_session: str | None = Cookie(default=None, alias=ADMIN_COOKIE_NAME),
 ) -> Admin:
-    token = pigeon_admin_session
+    token = sideword_admin_session
     if token is None:
         auth = request.headers.get("Authorization")
         if auth and auth.lower().startswith("bearer "):
@@ -99,15 +99,15 @@ async def get_current_admin(
 async def get_optional_admin(
     request: Request,
     session: AsyncSession = Depends(get_session),
-    pigeon_admin_session: str | None = Cookie(default=None, alias=ADMIN_COOKIE_NAME),
+    sideword_admin_session: str | None = Cookie(default=None, alias=ADMIN_COOKIE_NAME),
 ) -> Admin | None:
-    if not pigeon_admin_session:
+    if not sideword_admin_session:
         return None
     try:
         return await get_current_admin(
             request=request,
             session=session,
-            pigeon_admin_session=pigeon_admin_session,
+            sideword_admin_session=sideword_admin_session,
         )
     except HTTPException:
         return None

@@ -21,13 +21,13 @@ import secrets
 import tempfile
 from pathlib import Path
 
-os.environ.setdefault("PIGEON_SECRET_KEY", secrets.token_urlsafe(32))
-os.environ.setdefault("PIGEON_ADMIN_USERNAME", "admin")
-os.environ.setdefault("PIGEON_ADMIN_PASSWORD", "adminpass")
+os.environ.setdefault("SIDEWORD_SECRET_KEY", secrets.token_urlsafe(32))
+os.environ.setdefault("SIDEWORD_ADMIN_USERNAME", "admin")
+os.environ.setdefault("SIDEWORD_ADMIN_PASSWORD", "adminpass")
 
-_TMPDIR = tempfile.mkdtemp(prefix="pigeon-test-")
-os.environ["PIGEON_DB_PATH"] = str(Path(_TMPDIR) / "pigeon.sqlite3")
-os.environ["PIGEON_EXPORTS_DIR"] = str(Path(_TMPDIR) / "exports")
+_TMPDIR = tempfile.mkdtemp(prefix="sideword-test-")
+os.environ["SIDEWORD_DB_PATH"] = str(Path(_TMPDIR) / "sideword.sqlite3")
+os.environ["SIDEWORD_EXPORTS_DIR"] = str(Path(_TMPDIR) / "exports")
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
@@ -53,9 +53,9 @@ async def _run() -> None:
                 follow_redirects=False,
             )
             assert r.status_code == 303, r.text
-            cookie = r.cookies.get("pigeon_admin_session")
+            cookie = r.cookies.get("sideword_admin_session")
             assert cookie, "admin cookie missing"
-            c.cookies.set("pigeon_admin_session", cookie)
+            c.cookies.set("sideword_admin_session", cookie)
 
             # ---------- Create personal link ----------
             r = await c.post(
@@ -103,7 +103,7 @@ async def _run() -> None:
             # ---------- Browser test client ----------
             r = await c.get(f"/client?invite={pt}")
             assert r.status_code == 200
-            assert "Pigeon test client" in r.text
+            assert "Sideword test client" in r.text
             assert f'value="{pt}"' in r.text
             assert r.headers["cache-control"] == "no-store"
             assert "default-src 'none'" in r.headers["content-security-policy"]

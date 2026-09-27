@@ -96,9 +96,9 @@ async def _run(output: Path) -> int:
 
 def main() -> int:
     settings = get_settings()
-    parser = argparse.ArgumentParser(description="Export Pigeon configuration as JSON.")
+    parser = argparse.ArgumentParser(description="Export Sideword configuration as JSON.")
     default_path = settings.exports_path / (
-        f"pigeon-config-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+        f"sideword-config-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
     )
     parser.add_argument("--output", default=str(default_path), help="output file path")
     args = parser.parse_args()

@@ -18,13 +18,13 @@ COPY app ./app
 COPY scripts ./scripts
 
 RUN mkdir -p /data /exports \
-    && useradd --system --uid 1000 --home /app pigeon \
-    && chown -R pigeon:pigeon /app /data /exports
+    && useradd --system --uid 1000 --home /app sideword \
+    && chown -R sideword:sideword /app /data /exports
 
-USER pigeon
+USER sideword
 
-ENV PIGEON_DB_PATH=/data/pigeon.sqlite3 \
-    PIGEON_EXPORTS_DIR=/exports
+ENV SIDEWORD_DB_PATH=/data/sideword.sqlite3 \
+    SIDEWORD_EXPORTS_DIR=/exports
 
 EXPOSE 8000
 

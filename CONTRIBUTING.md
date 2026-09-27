@@ -1,6 +1,6 @@
-# Contributing to Pigeon Server
+# Contributing to Sideword Server
 
-Thanks for helping improve Pigeon Server. The project welcomes focused bug
+Thanks for helping improve Sideword Server. The project welcomes focused bug
 fixes, tests, documentation, and well-scoped feature proposals.
 
 ## Before you start
@@ -15,8 +15,9 @@ fixes, tests, documentation, and well-scoped feature proposals.
 Python 3.12 or newer is supported.
 
 ```bash
-git clone https://github.com/YOUR-USER/pigeon-server.git
-cd pigeon-server
+git clone https://github.com/YOUR-USER/sideword-server.git
+cd sideword-server
+git switch -c feature/your-change
 python -m venv .venv
 ```
 
@@ -39,7 +40,7 @@ cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-Put the generated value in `PIGEON_SECRET_KEY`, then update the local admin
+Put the generated value in `SIDEWORD_SECRET_KEY`, then update the local admin
 credentials in `.env`. Never commit `.env`, databases, exports, or credentials.
 
 ## Quality checks
@@ -51,21 +52,27 @@ python -m pip check
 python -m ruff check .
 python -m compileall -q app scripts tests
 python -m pytest
+node --check app/static/client.js
+node --check app/static/link-form.js
+node --check app/static/admin-links.js
+node --check app/static/invite-vault.js
+node --test tests/client_delivery.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
 ```
 
 For changes affecting deployment, also build the image:
 
 ```bash
-docker build -t pigeon-server:test .
+docker build -t sideword-server:test .
 ```
 
 ## Pull requests
 
-1. Fork the repository and create a branch from `main`.
+1. Fork the repository and create a feature or fix branch. Do not work directly on `main`.
 2. Add tests for behavioral changes.
 3. Update documentation when configuration or API behavior changes.
 4. Run all quality checks.
 5. Open a pull request explaining the problem, solution, and validation.
+6. For releases, update `app/version.py` and `CHANGELOG.md`. Merge into `main` only after all checks pass for the exact commit.
 
 By contributing, you agree that your contribution is licensed under the MIT
 License covering this repository.

@@ -1,6 +1,6 @@
 "use strict";
 
-const DB_NAME = "pigeon-test-client";
+const DB_NAME = "sideword-test-client";
 const STORE_NAME = "device";
 const IDENTITY_KEY = "identity";
 const HISTORY_PREFIX = "history:";
@@ -316,7 +316,7 @@ async function api(path, options = {}) {
 }
 
 function envelopeContext(chatId, messageId, senderId, recipientId) {
-  return encoder.encode(`pigeon-web-v1|${chatId}|${messageId}|${senderId}|${recipientId}`);
+  return encoder.encode(`sideword-web-v1|${chatId}|${messageId}|${senderId}|${recipientId}`);
 }
 
 async function deriveSharedSecret(privateKey, publicKey) {
@@ -717,7 +717,7 @@ async function handleSocketPayload(payload) {
 function connectSocket() {
   if (!identity?.token || (socket && socket.readyState <= WebSocket.OPEN)) return;
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${scheme}//${window.location.host}/ws`, ["pigeon.v1"]);
+  const ws = new WebSocket(`${scheme}//${window.location.host}/ws`, ["sideword.v1"]);
   socket = ws;
   ws.addEventListener("open", () => {
     if (socket !== ws || !identity?.token) {

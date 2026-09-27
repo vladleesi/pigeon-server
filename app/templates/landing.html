@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Pigeon invite{% endblock %}
+{% block title %}Sideword invite{% endblock %}
 {% block content %}
 <section class="card center">
-  <h1>Pigeon invite</h1>
+  <h1>Sideword invite</h1>
   {% if status == "active" %}
     {% if details.is_personal %}
     <p>This is a <b>personal</b> link for a private 1:1 chat.</p>
     {% else %}
     <p>This is a <b>group</b> invite link.</p>
     {% endif %}
-    <p>Open it in a compatible Pigeon client to activate.</p>
+    <p>Open it in a compatible Sideword client to activate.</p>
     {% if details.password_required %}<p>The room also requires a phrase or password. Ask the creator for it separately.</p>{% endif %}
     <p>Opening this page does not reserve a participant slot.</p>
     <p><a class="button primary" href="/client?invite={{ token }}">Open test web client</a></p>

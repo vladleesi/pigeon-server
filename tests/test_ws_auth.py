@@ -30,7 +30,7 @@ def test_token_can_be_read_from_websocket_subprotocol() -> None:
             "headers": [
                 (
                     b"sec-websocket-protocol",
-                    b"pigeon.v1, pigeon.auth.header.payload.signature",
+                    b"sideword.v1, sideword.auth.header.payload.signature",
                 )
             ],
             "query_string": b"",
@@ -75,11 +75,11 @@ def test_websocket_accepts_private_auth_subprotocol() -> None:
     with TestClient(create_app()) as client:
         with client.websocket_connect(
             "/ws",
-            subprotocols=["pigeon.v1", f"pigeon.auth.{token}"],
+            subprotocols=["sideword.v1", f"sideword.auth.{token}"],
         ) as websocket:
             hello = websocket.receive_json()
 
-            assert websocket.accepted_subprotocol == "pigeon.v1"
+            assert websocket.accepted_subprotocol == "sideword.v1"
             assert hello["type"] == "hello"
             assert hello["user"] == user.public_id
 
@@ -91,12 +91,12 @@ def test_websocket_accepts_authentication_first_frame() -> None:
     with TestClient(create_app()) as client:
         with client.websocket_connect(
             "/ws",
-            subprotocols=["pigeon.v1"],
+            subprotocols=["sideword.v1"],
         ) as websocket:
             websocket.send_json({"type": "auth", "token": token})
             hello = websocket.receive_json()
 
-            assert websocket.accepted_subprotocol == "pigeon.v1"
+            assert websocket.accepted_subprotocol == "sideword.v1"
             assert hello["type"] == "hello"
             assert hello["user"] == user.public_id
 
@@ -105,7 +105,7 @@ def test_websocket_rejects_invalid_first_frame_session() -> None:
     with TestClient(create_app()) as client:
         with client.websocket_connect(
             "/ws",
-            subprotocols=["pigeon.v1"],
+            subprotocols=["sideword.v1"],
         ) as websocket:
             websocket.send_json({"type": "auth", "token": "not-a-valid-token"})
 
@@ -130,7 +130,7 @@ def test_websocket_rejects_session_from_revoked_invite() -> None:
     asyncio.run(revoke())
 
     with TestClient(create_app()) as client:
-        with client.websocket_connect("/ws", subprotocols=["pigeon.v1"]) as websocket:
+        with client.websocket_connect("/ws", subprotocols=["sideword.v1"]) as websocket:
             websocket.send_json({"type": "auth", "token": token})
             assert websocket.receive_json() == {
                 "type": "auth_error",
