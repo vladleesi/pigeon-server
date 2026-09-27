@@ -6,7 +6,7 @@ privately using the [security policy](SECURITY.md).
 
 ## Development setup
 
-Follow the [local setup](README.md#run-locally), then install development
+Follow the [setup instructions](README.md#setup), then install development
 dependencies. Frontend checks require Node.js 22.
 
 ```sh
@@ -60,7 +60,7 @@ the promoted commit as `vX.Y.Z`. Use patch versions for fixes, minor versions
 for features or pre-1.0 breaking changes, and major versions for stable breaking
 changes. The backend version is exposed in `/health` and OpenAPI; API `/api/v1`
 and encryption envelope versions are independent. Promotion does not deploy
-the backend; [landing-page publishing](docs/DEPLOYMENT.md#landing-page) is separate.
+the backend.
 
 Contributions use the project's [MIT license](LICENSE). Follow the
 [code of conduct](CODE_OF_CONDUCT.md).

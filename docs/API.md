@@ -6,8 +6,8 @@ HTTP API requests require `Authorization: Bearer <JWT>`.
 
 For password-protected rooms, include `password` in activation. Persist a random
 `resume_credential` before the first activation request so retries reuse the same
-participant slot. See [protected invites](INVITES.md) for the complete admission,
-rate-limit, expiration, and reconnection contract.
+participant slot. See [invites and chats](../README.md#invites-and-chats) for
+room limits, password handling, expiration, and browser use.
 
 ## Bundled test web client
 
@@ -25,7 +25,7 @@ Use it on `localhost` or behind HTTPS. It is intended for testing, has not been
 independently audited, and its envelope format is not compatible with NaCl
 `crypto_box` clients without an interoperability layer.
 
-For a two-browser walkthrough, see [local setup](../README.md#run-locally).
+For a two-browser walkthrough, see [invites and chats](../README.md#invites-and-chats).
 Invite links use `/l/{token}` and open a landing page that links to `/client`.
 
 ## Activate link
@@ -60,6 +60,34 @@ contains a client JWT, user identity, and chat participants:
   Authenticated reconnects reuse the existing slot.
 - Group links share a chat and optionally seal at their participant limit.
 - If the device already sends `Authorization: Bearer ...`, activation **does not** create a new user — it adds the current user to the new chat/group.
+
+### Admission and retries
+
+Generate a separate cryptographically random 32-byte `resume_credential` for
+each invite, encode it as unpadded base64url (43 characters), and persist it
+with the device identity before activation. A retry with the same credential
+and public key reuses the participant even if the original response was lost;
+the server stores only the credential's SHA-256 digest. A valid bearer JWT can
+also reconnect without another password or slot, but a public key alone cannot.
+
+Admission uses a SQLite `BEGIN IMMEDIATE` transaction to prevent concurrent
+joins from overfilling rooms. Failed password guesses are limited to five per
+invite per five-minute fixed window, persisted in SQLite. Further attempts
+return 429 with `Retry-After`; changing IP addresses does not reset the limit.
+Anyone holding an invite can exhaust its guess budget, while authenticated
+reconnects remain available. Expired or revoked access cannot be restored with
+a password or resume credential.
+
+Password verification uses OpenSSL-backed scrypt with N=2^17, r=8, p=1, a random
+16-byte salt, and a 32-byte result. Generated passwords contain 96 random bits.
+This is server verification over HTTPS, not PAKE: the server and TLS terminator
+must be trusted. Passwords are never included in URLs or stored or exported in
+plaintext. Admin exports preserve verifiers and retry metadata; startup adds
+these fields without changing unprotected invites.
+
+The admin UI's invite recovery uses AES-GCM with a non-exportable IndexedDB key
+and a random record ID in sessionStorage. It preserves the latest protected
+invite in the same tab for up to 24 hours and purges expired records on access.
 
 ## Profile and chats
 

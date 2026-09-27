@@ -3,89 +3,161 @@
 [![Tests](https://github.com/vladleesi/sideword-chat-server/actions/workflows/test.yml/badge.svg)](https://github.com/vladleesi/sideword-chat-server/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A self-hosted messenger backend built with FastAPI and SQLite. It supports
-invite-only personal and group chats, optional room passwords, expiring invites,
-and an admin UI. Clients encrypt messages; the server relays ciphertext and
-deletes it after acknowledgement, reading, or expiry.
+Sideword is a self-hosted messenger backend built with FastAPI and SQLite. It
+supports invite-only personal and group chats, optional room passwords, expiring
+invites, and an admin UI. Clients encrypt messages, while the server relays
+ciphertext and deletes it after acknowledgement, reading, or expiry.
 
-The bundled browser client is for testing. The protocol has not been independently
-audited. See the [security policy](SECURITY.md).
+The bundled browser client helps test deployments and client integrations. The
+protocol has not been independently audited; see the [security policy](SECURITY.md).
 
-## Run locally
+## Setup
 
-Requires Git and Python 3.12+. No frontend build is needed.
+Clone the repository, then choose Python or Docker below. Neither requires a
+frontend build.
 
 ```sh
 git clone https://github.com/vladleesi/sideword-chat-server.git
 cd sideword-chat-server
-python -m venv .venv
 ```
 
-Activate the environment:
-
-| Shell | Command |
-| --- | --- |
-| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
-| Linux/macOS | `source .venv/bin/activate` |
-
-Install dependencies:
-
-```sh
-python -m pip install -r requirements.txt
-```
-
-Copy `.env.example` to `.env`: `Copy-Item .env.example .env` in PowerShell or
-`cp .env.example .env` on Linux/macOS. Set `SIDEWORD_ADMIN_USERNAME` and replace
-`SIDEWORD_ADMIN_PASSWORD`. Generate a signing secret:
+Copy `.env.example` to a new file named `.env` using your editor or file manager.
+Set `SIDEWORD_ADMIN_USERNAME` and replace `SIDEWORD_ADMIN_PASSWORD` with your
+admin credentials. Set `SIDEWORD_SECRET_KEY` to a cryptographically random value
+of at least 32 characters. With Python installed, generate one using:
 
 ```sh
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-Paste the result into `SIDEWORD_SECRET_KEY` in `.env`, then start the server:
+Without a local Python installation, run the same command prefixed with
+`docker run --rm python:3.12-slim`. Paste the generated value into `.env` before
+starting the server, and keep that file out of version control.
+
+### Run locally
+
+Use Python 3.12 or newer and create a virtual environment:
 
 ```sh
+python -m venv .venv
+```
+
+Activate `.venv` using your shell's virtual-environment activation method, or
+select its Python interpreter in your IDE. The following commands assume
+`python` uses that environment; if your Python command is named `python3`, use
+that name instead.
+
+```sh
+python -m pip install -r requirements.txt
 python -m scripts.serve_shared
 ```
 
-Open these paths on **localhost, port 8000**:
+The shared runner binds both listeners to loopback: port **8000** includes
+administration, while port **8001** serves the public API and browser client
+with administration blocked.
 
-| Path | Purpose |
-| --- | --- |
-| `/admin/links` | Sign in with the admin credentials from `.env`; create invites |
-| `/client` | Test browser client |
-| `/docs` | Interactive API reference |
-| `/health` | Health and backend version |
+### Docker
 
-Port **8001** serves the public API and client with administration blocked.
-Both listeners bind to loopback. Stop with Ctrl+C. Keep `.env` out of Git.
-
-To test a chat, create an invite and open it in two separate browser profiles
-or a normal and private window. Activate both participants and compare peer key
-fingerprints out of band. Share room passwords separately from invite links.
-**Reset device** permanently removes that browser's keys and local history.
-
-## Docker
-
-Requires Git, Docker, and Compose v2. Clone the repository and configure `.env`
-as above; skip the virtual environment and dependency installation. If Python
-is unavailable, prefix the secret-generation command above with
-`docker run --rm python:3.12-slim`.
+With Docker and Compose v2 installed and `.env` configured, build and start the
+server:
 
 ```sh
 docker compose up -d --build
 ```
 
-Use the same paths on localhost, port **8000**. Data persists in the
-`sideword-data` volume. Stop with `docker compose stop`, resume with
-`docker compose start`. `docker compose down -v` deletes the database volume.
-Before exposing the server publicly, follow the [deployment guide](docs/DEPLOYMENT.md).
+Compose exposes the server on loopback port **8000**, including administration.
+The service is `sideword`, its database persists in the `sideword-data` volume,
+and exports are mounted to the local `exports/` directory. Use
+`docker compose stop` and `docker compose start` to stop and resume it.
+`docker compose down` preserves the database volume; adding `-v` deletes it.
 
-## Documentation
+### Open the server
 
-- [Deployment](docs/DEPLOYMENT.md): settings, admin recovery, HTTPS, and the `docs/` site.
-- [Invites](docs/INVITES.md): passwords, participant limits, and reconnects.
-- [Client API](docs/API.md): encryption, delivery, and acknowledgement rules.
-- [Backups and upgrades](docs/UPGRADING.md): exports, storage, and migrations.
-- [Contributing](CONTRIBUTING.md): development setup, checks, and releases.
+Use these paths on localhost, port **8000**, for either installation method:
+
+| Path | Purpose |
+| --- | --- |
+| `/admin/links` | Sign in with your configured admin credentials and create invites |
+| `/client` | Test the browser client |
+| `/docs` | Explore the interactive API reference |
+| `/health` | Check server health and the backend version |
+
+## Configuration
+
+Settings can be supplied through environment variables or `.env`. Every setting
+below uses the `SIDEWORD_` prefix, for example `SIDEWORD_MESSAGE_TTL_DAYS=30`.
+
+| Setting | Default / purpose |
+| --- | --- |
+| `SECRET_KEY` | Required random signing secret, at least 32 characters |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Create an admin on first startup |
+| `PUBLIC_URL` | Invite origin; defaults to HTTP on localhost, port 8000 |
+| `DB_PATH` | `./data/sideword.sqlite3`; `/data/sideword.sqlite3` in Docker |
+| `EXPORTS_DIR` | `./exports`; `/exports` in Docker |
+| `JWT_TTL_HOURS` | `720`; client session lifetime in hours |
+| `ADMIN_SESSION_TTL_HOURS` | `12`; admin session lifetime in hours |
+| `MESSAGE_TTL_DAYS` | `30`; pending ciphertext lifetime in days |
+| `MAX_CIPHERTEXT_BYTES` | `65536`; maximum ciphertext size per envelope |
+
+Bootstrap credentials can be removed from `.env` after the admin account exists.
+To create an account or reset its password, run the interactive command:
+
+```sh
+python -m scripts.create_admin --username admin
+```
+
+For Docker, prefix it with `docker compose exec sideword`.
+
+## Public access
+
+Set `SIDEWORD_PUBLIC_URL=https://chat.example.com` to your public HTTPS origin
+before starting the server so generated invitations use the correct address.
+Configure an HTTPS reverse proxy or tunnel with WebSocket forwarding, and trust
+forwarded scheme headers only from the actual proxy address.
+
+| Installation | Proxy target | Administration |
+| --- | --- | --- |
+| Shared Python runner | Loopback port 8001 | Blocked on 8001; available locally on 8000 |
+| Docker Compose | Loopback port 8000 | Proxy must block `/admin` and its subpaths, `/docs`, `/redoc`, and `/openapi.json` |
+
+Keep administration private. Protected invites require HTTPS except during
+direct loopback development. A temporary tunnel can forward to port 8001 of the
+shared runner; update `SIDEWORD_PUBLIC_URL` and restart the backend whenever its
+public origin changes. A named tunnel with a personal domain provides a stable
+address. Keep tunnel addresses and credentials out of version control.
+
+## Invites and chats
+
+In **Admin > Invite links > Create link**, choose a personal room with two
+participant slots or a group with an optional limit of 2-1000 participants.
+You can leave the room unprotected, generate a 16-character password, or set a
+custom phrase of 8-32 characters. Custom phrases match exactly, including case
+and whitespace. Share passwords separately from invite links.
+
+Opening an invitation or a link preview does not claim a slot; participants
+must explicitly activate it, including the creator if they want to join.
+Full rooms stop accepting new participants, while authenticated reconnects
+reuse existing slots. Revocation, deletion, participant deactivation, and
+expiry invalidate access. Losing browser credentials does not free a slot.
+
+To test a chat, open the invite in two separate browser profiles or a normal and
+private window, activate both participants, and compare peer key fingerprints
+out of band. Device keys and decrypted history stay in the browser; **Reset
+device** permanently removes them. The latest protected invite is saved encrypted
+in the same tab for up to 24 hours, including across refreshes, but closing the
+tab or clearing browser data can lose it.
+
+Room passwords use salted scrypt verification over HTTPS. The application server
+and TLS terminator see submitted passwords in memory and must be trusted;
+avoid request-body logging. Passwords control admission and do not replace
+message encryption or peer key verification. Failed guesses are limited to five
+per invite per five-minute window, regardless of IP address; authenticated
+reconnects remain available. See the [client API](docs/API.md#activate-link)
+for activation, retry credentials, and the detailed security contract.
+
+## Further documentation
+
+- [Client API](docs/API.md) explains encryption, delivery, and acknowledgement rules.
+- [Backups and upgrades](docs/UPGRADING.md) covers configuration exports, storage, and migrations.
+- [Contributing](CONTRIBUTING.md) covers development setup, checks, and releases.
 - [Changelog](CHANGELOG.md), [Security](SECURITY.md), [Code of conduct](CODE_OF_CONDUCT.md), and [MIT license](LICENSE).
