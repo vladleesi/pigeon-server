@@ -1,8 +1,8 @@
 services:
   sideword:
     build: .
-    image: sideword-server:latest
-    container_name: sideword-server
+    image: sideword-chat-server:latest
+    container_name: sideword-chat-server
     restart: unless-stopped
     env_file:
       - .env

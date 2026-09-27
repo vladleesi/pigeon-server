@@ -15,8 +15,8 @@ fixes, tests, documentation, and well-scoped feature proposals.
 Python 3.12 or newer is supported.
 
 ```bash
-git clone https://github.com/YOUR-USER/sideword-server.git
-cd sideword-server
+git clone https://github.com/YOUR-USER/sideword-chat-server.git
+cd sideword-chat-server
 git switch -c feature/your-change
 python -m venv .venv
 ```
@@ -62,7 +62,7 @@ node --test tests/client_delivery.test.cjs tests/admin_links.test.cjs tests/invi
 For changes affecting deployment, also build the image:
 
 ```bash
-docker build -t sideword-server:test .
+docker build -t sideword-chat-server:test .
 ```
 
 ## Pull requests

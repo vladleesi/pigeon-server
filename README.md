@@ -1,6 +1,6 @@
 # Sideword Server
 
-[![Tests](https://github.com/vladleesi/sideword-server/actions/workflows/test.yml/badge.svg)](https://github.com/vladleesi/sideword-server/actions/workflows/test.yml)
+[![Tests](https://github.com/vladleesi/sideword-chat-server/actions/workflows/test.yml/badge.svg)](https://github.com/vladleesi/sideword-chat-server/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Backend version: 0.2.0.** A link-only messenger backend with personal and group
@@ -14,8 +14,8 @@ ACK/read or TTL, rather than retained as a permanent archive.
 Requires Python 3.12+; Node.js 22 is used for frontend tests.
 
 ```sh
-git clone https://github.com/vladleesi/sideword-server.git
-cd sideword-server
+git clone https://github.com/vladleesi/sideword-chat-server.git
+cd sideword-chat-server
 python -m venv .venv
 ```
 
@@ -55,7 +55,7 @@ docker compose stop                 # retain data
 docker compose start
 ```
 
-The service is `sideword`, the image is `sideword-server:latest`, and the persistent
+The service is `sideword`, the image is `sideword-chat-server:latest`, and the persistent
 volume is `sideword-data`. `docker compose down` retains that volume; adding `-v`
 deletes it. The Compose listener is local-only on port 8000 and includes admin
 routes. Configure the reverse proxy to deny `/admin`, `/docs`, `/redoc`, and
@@ -162,7 +162,7 @@ metadata URLs described below.
 
 The landing page includes a canonical URL, Open Graph/X preview metadata, a PNG
 social card, JSON-LD, and a one-page sitemap. The configured public URL is
-`https://vladleesi.dev/sideword-server/`. Before using a different domain or
+`https://vladleesi.dev/sideword-chat-server/`. Before using a different domain or
 repository path, update the absolute URLs in `docs/index.html`, `docs/sitemap.xml`,
 and `docs/robots.txt`. Preview images must be publicly accessible after deployment.
 

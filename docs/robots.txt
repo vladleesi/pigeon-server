@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://vladleesi.dev/sideword-server/sitemap.xml
+Sitemap: https://vladleesi.dev/sideword-chat-server/sitemap.xml
