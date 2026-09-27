@@ -49,7 +49,7 @@ const seenReceiptIds = new Set();
 const processingMessageIds = new Set();
 const failedMessageReasons = new Map();
 const pendingReadsByChat = new Map();
-const pendingReceiptIds = new Set();
+const pendingReceiptIds = new Map();
 
 function bytesToBase64(bytes) {
   return SidewordProtocol.bytesToBase64(bytes);
@@ -523,27 +523,44 @@ function senderKeyIsLoaded(message) {
   );
 }
 
+function deliveryReference(delivery, peerField) {
+  if (!/^[0-9a-f]{32}$/.test(delivery.delivery_id || "")) {
+    throw new Error("Server delivery identity missing. Update the server before acknowledging messages.");
+  }
+  return {
+    delivery_id: delivery.delivery_id,
+    chat_id: delivery.chat_id,
+    client_message_id: delivery.client_message_id,
+    [peerField]: delivery[peerField],
+  };
+}
+
 function queueRead(message) {
-  const ids = pendingReadsByChat.get(message.chat_id) || new Set();
-  ids.add(message.client_message_id);
+  const reference = deliveryReference(message, "sender_public_id");
+  const ids = pendingReadsByChat.get(message.chat_id) || new Map();
+  ids.set(message.delivery_id, reference);
   pendingReadsByChat.set(message.chat_id, ids);
+}
+
+async function flushDeliveryBatch(path, field, pending) {
+  // Keep each failed batch queued. Delete only the successful snapshot so a
+  // delivery added during the request cannot be lost.
+  while (pending.size) {
+    const batch = [...pending.values()].slice(0, 100);
+    await api(path, {
+      method: "POST",
+      body: JSON.stringify({ [field]: batch }),
+    });
+    for (const reference of batch) pending.delete(reference.delivery_id);
+  }
 }
 
 async function flushAcknowledgements() {
   for (const [chatId, ids] of pendingReadsByChat) {
-    await api(`/api/v1/chats/${chatId}/read`, {
-      method: "POST",
-      body: JSON.stringify({ client_message_ids: [...ids] }),
-    });
+    await flushDeliveryBatch(`/api/v1/chats/${chatId}/read/exact`, "messages", ids);
     pendingReadsByChat.delete(chatId);
   }
-  if (pendingReceiptIds.size) {
-    await api("/api/v1/ack", {
-      method: "POST",
-      body: JSON.stringify({ read_ids: [...pendingReceiptIds] }),
-    });
-    pendingReceiptIds.clear();
-  }
+  await flushDeliveryBatch("/api/v1/ack/exact", "receipts", pendingReceiptIds);
 }
 
 async function processMessages(messages) {
@@ -589,9 +606,10 @@ async function processMessages(messages) {
 
 async function processReceipts(receipts) {
   for (const receipt of receipts) {
+    const reference = deliveryReference(receipt, "reader_public_id");
     const key = `receipt:${JSON.stringify([receipt.chat_id, receipt.reader_public_id, receipt.client_message_id])}`;
     if (seenReceiptIds.has(key)) {
-      pendingReceiptIds.add(receipt.id);
+      pendingReceiptIds.set(receipt.delivery_id, reference);
       continue;
     }
     await appendMessage(receipt.chat_id, {
@@ -601,7 +619,7 @@ async function processReceipts(receipts) {
       createdAt: serverTimestamp(receipt.created_at),
     });
     seenReceiptIds.add(key);
-    pendingReceiptIds.add(receipt.id);
+    pendingReceiptIds.set(receipt.delivery_id, reference);
   }
 }
 

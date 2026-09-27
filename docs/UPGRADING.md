@@ -40,8 +40,8 @@ for the release process.
 ## Client security hardening (v1-compatible)
 
 The protocol module must be deployed alongside `client.js` and `client.html`.
-Reload the client to load both scripts. No server schema, identity key, JWT,
-invite credential, ciphertext, or local-history migration is required. New
+Reload the client to load both scripts. No identity key, JWT, invite credential,
+ciphertext, or local-history migration is required. New
 `peer:` records hold local first-use fingerprint pins in the existing IndexedDB
 store. Older client code ignores them; rolling back loses pin enforcement.
 Verify existing peers out of band on the first upgraded use. Unexpected changed
@@ -52,3 +52,26 @@ or revoked credentials may therefore disconnect earlier than with the old client
 ping-dependent behavior. Supported authentication transports and default TTLs
 are unchanged. See [security review](SECURITY_REVIEW.md) for the separate ratchet
 and renewable-session migration plan.
+
+## Exact delivery acknowledgements
+
+Update the server before reloading browser clients. Startup adds `delivery_id`
+columns and unique indexes to pending messages and receipts, backfilling a random
+identity for each existing row. Existing ciphertext and timestamps remain intact;
+later startups preserve the identifiers. All server writers must be upgraded
+together; running old and new server code against the same database is unsupported.
+SQLite 3.35 or newer is required for atomic `DELETE ... RETURNING` operations.
+
+Polling and WS payloads include the new field. Old clients can still use legacy
+HTTP endpoints. The upgraded browser requires exact endpoints and leaves failed
+acknowledgements retryable when connected to an older server. Do not downgrade
+only the server underneath upgraded clients. A server-code rollback requires a
+compatible pre-upgrade database backup and matching client code; it loses later
+state and the new delivery protections.
+
+Full database backups preserve delivery IDs; configuration exports omit queued
+messages and receipts. A restored backup can contain previously acknowledged
+deliveries. Clients must still deduplicate local history and acknowledge restored
+rows after confirming persistence. This change adds no permanent delivery ledger
+and does not prevent duplicate sends. Delivery IDs expire or are deleted with
+their message/receipt rows.

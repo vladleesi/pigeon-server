@@ -47,6 +47,7 @@ async def _backlog_payload(
     messages = [
         IncomingMessage(
             id=msg.id,
+            delivery_id=msg.delivery_id,
             client_message_id=msg.client_message_id,
             chat_id=msg.chat_id,
             sender_public_id=sender.public_id,
@@ -64,6 +65,7 @@ async def _backlog_payload(
     receipts = [
         IncomingReadReceipt(
             id=r.id,
+            delivery_id=r.delivery_id,
             client_message_id=r.client_message_id,
             chat_id=r.chat_id,
             reader_public_id=r.reader_public_id,

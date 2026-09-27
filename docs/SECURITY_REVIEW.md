@@ -26,7 +26,7 @@ and TLS terminator with submitted passwords; these are not message keys.
 | Identity | Calculate full fingerprints locally; pin the first peer key with an atomic persistent check; block changed keys before encryption/decryption | Trust on first use is not authentication. Initial substitution, new public IDs, malicious rosters, and malicious served code remain possible. |
 | Key storage | Generate new identity and ephemeral private CryptoKeys non-exportable from the outset; remove identity export/reimport | Same-origin script can still invoke keys and read decrypted data; browser/profile compromise and copied storage remain threats. |
 | WebSocket sessions | Revalidate the individual socket credential before each push/backlog, on incoming frames, and every 30 seconds while idle | A check cannot retract data already sent or eliminate the small check/send race. Extra database reads are a deliberate cost. |
-| Persistence/deletion | Missing history storage now fails closed, retaining messages for retry instead of acknowledging an unsaved message | Legacy ACK ambiguity and multi-tab delivery/storage coordination still need a separate design. |
+| Persistence/deletion | Missing history storage fails closed; exact ACK/read bind random delivery IDs and full logical identities; read deletion and receipt creation are atomic | Legacy clients retain ambiguous deletion APIs. Send idempotency and multi-tab local storage coordination remain follow-up work. |
 | Metadata | Shared runner disables raw access logs on both listeners; browser polling no longer adds a redundant client timestamp | Proxy/CDN/container logs are separately controlled; sender/recipient IDs, membership, timing, ciphertext sizes, and receipts remain visible to the relay. |
 
 Pins occupy new `peer:` records in the existing IndexedDB store. Existing history
@@ -80,6 +80,34 @@ These flows need their own tested hardening pass, not changes hidden in an E2EE
 migration. `/me` currently reports no access deadline for an unlimited invite,
 even though its JWT still expires; expiry enforcement itself uses the JWT.
 
+## Follow-up: exact delivery acknowledgements
+
+`POST /api/v1/ack/exact` and `POST /api/v1/chats/{chat_id}/read/exact`
+require full logical identities plus random 128-bit `delivery_id` values. Owner
+checks remain mandatory. Polling, WS backlog, and live delivery carry the same
+identifier. SQLite row reuse, repeated sender/client IDs, and different group
+senders choosing the same client message ID cannot make an old exact reference
+delete a new row. New rows receive fresh IDs; existing rows are backfilled at
+startup and retain their IDs across restarts and full database restores.
+
+Read consumption uses `DELETE ... RETURNING`; receipt insertion commits in the
+same transaction. Concurrent reads and retries after lost responses create at
+most one receipt per queued row, and a receipt-write failure restores the
+message. Both legacy and exact read paths share this atomic operation. Exact
+requests have bounded reference lists and reject unknown fields. The browser
+batches up to 100 references, retains failed batches, and does not fall back to
+ambiguous legacy APIs when exact support is unavailable.
+
+This is deletion hardening, not send idempotency or proof of decryption. Duplicate
+uploads still produce separate deliveries and can produce separate receipts.
+Clients still deduplicate history by logical message identity. A stolen JWT can
+still delete its owner's rows; malicious relay metadata and served code remain
+outside this protection. No permanent deduplication ledger is introduced.
+Delivery IDs are retained only with the queued row. Restored backups can replay
+previously acknowledged rows, so local history deduplication remains necessary.
+See [upgrade notes](UPGRADING.md#exact-delivery-acknowledgements) for rollout,
+SQLite requirements, and rollback constraints.
+
 ## Local history, metadata, and deployment
 
 Local history stays encrypted under a separate AES key, with storage location
@@ -91,9 +119,9 @@ protect plaintext already retained in local history on a compromised device.
 
 Read receipts are server-authenticated metadata, not cryptographic proof that a
 peer read a message. The relay can delay, suppress, replay, reorder, or fabricate
-metadata. The existing `/read` and row-ID ACK contracts have ambiguity under ID
-collisions/reuse; see the protocol document. Retaining the API avoids silently
-changing deletion behavior, but this is a priority for additive hardening.
+metadata. Legacy `/read` and row-ID ACK contracts retain ambiguity under ID
+collisions/reuse for compatibility. The bundled browser now uses additive exact
+endpoints, described above and in the protocol document.
 
 Queued ciphertext and receipts expire after the configured TTL (default 30 days;
 cleanup runs hourly) or are deleted on read/ACK. Users, memberships, invite
@@ -149,9 +177,11 @@ JavaScript port solely because it runs in the current browser client.
 
 ## Migration gates and next work
 
-1. Add exact-identity ACK/read support and server idempotency with explicit tests
-   for delayed ACKs, row reuse, malicious group-ID collisions, duplicate sends,
-   lost responses, multi-tab processing, and backups. Preserve legacy endpoints.
+1. Exact-identity ACK/read support is implemented with tests for delayed ACKs,
+   row reuse (including repeated logical IDs), group-ID collisions, lost responses,
+   concurrent reads, transaction rollback, and backups. Next add server send
+   idempotency with an explicit retention policy, conflict handling, durable
+   outgoing retries, and real multi-tab storage tests. Preserve legacy endpoints.
 2. Prototype protocols away from live identities. Compare maintenance, licensing,
    mobile/browser support, audit coverage, memory/key storage, offline behavior,
    group membership, and bandwidth. Require cross-language vectors and review.
@@ -182,12 +212,23 @@ pin persistence failure, changed-key ACK suppression, and all supported WS auth
 transports. HTTP integration tests use isolated temporary databases. The CI test
 workflow includes the new JavaScript suites and module syntax check.
 
-Final local validation: 60 Python tests and 27 JavaScript tests passed. Ruff,
+Initial-pass local validation: 60 Python tests and 27 JavaScript tests passed. Ruff,
 JavaScript syntax checks, `pip check`, `compileall`, whitespace checks, local
 documentation links, and landing-page structured data passed. The Python suite
 emits an existing Starlette/AnyIO deprecation warning. Landing copy, API and
 deployment references, SEO/structured data, and the social preview were reviewed;
 the existing backend-focused preview and metadata remain accurate.
+
+Exact-delivery follow-up validation: 73 Python tests and 30 JavaScript tests
+passed. New coverage includes identity and owner mismatches, stale message and
+receipt references after row reuse, group collisions, concurrent reads, lost
+responses, receipt-write rollback, WS/poll reference consistency, migration and
+backup stability, bounded browser batches, and refusal to fall back to legacy
+deletion. Ruff, JavaScript syntax checks, `pip check`, `compileall`, whitespace,
+local documentation links, page assets, and structured data passed. The existing
+Starlette/AnyIO warning remains. API/upgrade docs, landing copy and snippets were
+updated; SEO metadata and the backend-focused social preview remain accurate.
+Browser checks in this pass used the Node harness, not a live browser session.
 
 Live browser verification remains incomplete: initial browser discovery found
 no connection, and a later attempt was blocked by a browser integration mismatch.

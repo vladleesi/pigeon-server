@@ -148,14 +148,38 @@ Rules:
 
    Returns `messages` and `read_receipts` arrays.
 
+## Exact delivery identities
+
+Every message and receipt returned by polling, WS backlog, or live WS events has
+an additive `delivery_id`: a server-generated, random 32-character lowercase hex
+identifier. It stays stable while that row exists, including database restarts
+and backups. A newly queued row gets a fresh identity even if SQLite reuses its
+integer `id` or a sender repeats its `client_message_id`. It is metadata, not a
+secret or proof of decryption. All operations still require the owner's JWT.
+
+Use the exact endpoints below for new clients. The bundled browser uses them
+without falling back to legacy deletion if an older server rejects the request.
+
 ## Mark read
 
 ```
-POST /api/v1/chats/{chat_id}/read
-{ "client_message_ids": ["m-1", "m-2"] }
+POST /api/v1/chats/7/read/exact
+{
+  "messages": [{
+    "delivery_id": "0123456789abcdef0123456789abcdef",
+    "chat_id": 7,
+    "sender_public_id": "sender-public-id",
+    "client_message_id": "m-1"
+  }]
+}
 ```
 
-The ciphertext row is removed from the server. A read receipt is created for the sender (poll/ws); after ACK it is deleted.
+Copy all reference fields from the received message. All must match a row
+addressed to the authenticated recipient; `chat_id` must also match the route.
+Send 1–100 references per request. Deletion and receipt creation occur in one
+transaction. Concurrent readers or retries after a lost response consume a row
+at most once. The response is `{"marked": N}`; stale references return zero.
+The sender receives the receipt through poll/WS and can then acknowledge it.
 
 ## Acknowledge server-side deletion
 
@@ -163,16 +187,37 @@ Authenticate, decrypt, and persist messages locally before acknowledging them.
 Keep failures retryable and serialize incoming processing.
 
 ```
-POST /api/v1/ack
+POST /api/v1/ack/exact
 {
-  "message_ids": [123, 124],   // fetched and persisted locally
-  "read_ids":    [45]          // read receipt ids
+  "messages": [],
+  "receipts": [{
+    "delivery_id": "fedcba9876543210fedcba9876543210",
+    "chat_id": 7,
+    "reader_public_id": "reader-public-id",
+    "client_message_id": "m-1"
+  }]
 }
 ```
+
+`messages` accepts the same references as exact read, deleting ciphertext without
+creating receipts. `receipts` binds the delivery, chat, reader, and client message
+ID to the authenticated original sender. Both lists are optional and limited to
+100 items each; unknown fields are rejected. The response is
+`{"deleted_messages": N, "deleted_receipts": N}`. Repeat a failed request with
+the same references; a successful retry can report zero if the first committed.
 
 After ACK, rows are gone from the server. SQLite row IDs may be reused: deduplicate
 messages by chat, sender, and client message ID; receipts by chat, reader, and
 client message ID. Treat timestamps without a timezone as UTC when ordering history.
+
+Legacy `POST /api/v1/ack` with `message_ids`/`read_ids` and
+`POST /api/v1/chats/{chat_id}/read` with `client_message_ids` remain supported.
+They retain their ambiguous matching: delayed ACKs can target reused row IDs,
+and legacy reads can match different group senders sharing a client message ID.
+The exact endpoints prevent these deletion mistakes; they do not make sends
+idempotent. Duplicate uploads still create distinct deliveries. Use a fresh
+client message ID for each logical message. Stolen bearer tokens can still
+delete their owner's deliveries through either API.
 
 ## Drop own undelivered messages
 

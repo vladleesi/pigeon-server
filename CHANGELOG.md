@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add exact delivery ACK/read endpoints and random delivery IDs; switch browser retries to the safer contract while preserving legacy APIs.
+- Atomically consume read messages and create receipts, preventing duplicate receipts from concurrent readers.
 - Preserve the browser v1 wire format while separating protocol operations from UI and storage.
 - Compute fingerprints locally, pin peer keys, and block unexpected key changes.
 - Generate new private keys non-exportable and retain messages when history storage is unavailable.

@@ -82,18 +82,29 @@ private keys are generated non-exportable; existing keys are reused unchanged.
 
 ## Delivery requirements for future clients
 
-Authenticate, decrypt, and commit local history before issuing either `/read`
-or `/ack`; both can delete queued ciphertext. Failed decryption, pin checks, or
+Authenticate, decrypt, and commit local history before issuing either `/read/exact`
+or `/ack/exact`; both can delete queued ciphertext. Failed decryption, pin checks, or
 storage must leave messages retryable. Serialize incoming processing across WS
 and polling. Deduplicate messages by chat, sender public ID, and client message
 ID, and receipts by chat, reader public ID, and client message ID. SQLite row IDs
 are not durable message identities. Treat naive database timestamps as UTC.
 
+Use the [exact delivery endpoints](API.md#exact-delivery-identities), binding
+`delivery_id`, chat, sender/reader public ID, and client message ID. The random
+delivery identity is relay metadata, outside the v1 ciphertext and HKDF context.
+It identifies one queued row and survives a full database backup/restore. Batch
+at most 100 references per list; retain failed batches for retry. A zero count
+is a successful no-op when the referenced delivery no longer exists. Exact read
+consumes a row and creates its receipt atomically, including concurrent requests.
+
 The legacy `/ack` takes row IDs and `/read` takes client message IDs. Delayed
 ACKs can race row-ID reuse, and colliding client message IDs from different group
-senders are ambiguous to `/read`. A future additive ACK contract must bind the
-full message identity while continuing to serve existing clients. Do not silently
-change these deletion semantics during a cryptographic migration.
+senders are ambiguous to legacy `/read`. They remain supported for existing
+clients; new clients must not fall back to them. Server send idempotency remains
+future work: uploads with the same logical identity still create separate
+deliveries. Delivery IDs do not authenticate relay metadata or prevent replay
+by a malicious relay. Durable outbox and cross-tab storage coordination remain
+separate requirements.
 
 `tests/client_crypto.test.cjs` checks both directions of v1 interoperability
 against Node's independent OpenSSL APIs using synthetic fixed keys, salt, and

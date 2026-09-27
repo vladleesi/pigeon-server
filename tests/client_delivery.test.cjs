@@ -26,7 +26,7 @@ test('reused SQLite row IDs do not drop new messages or receipts', async () => {
   const run = client();
   await run(`(async () => {
     for (let i = 0; i < 10; i++) {
-      const message = { id: 1, chat_id: 7, sender_public_id: 'alice',
+      const message = { delivery_id: 'a'.repeat(32), id: 1, chat_id: 7, sender_public_id: 'alice',
         client_message_id: 'uuid-' + i, ciphertext: 'text-' + i,
         created_at: '2026-09-26T02:00:' + String(i).padStart(2, '0') };
       await processMessages([message]);
@@ -84,7 +84,7 @@ test('failed local persistence can retry without acknowledging an unsaved messag
   const run = client();
   await run(`(async () => {
     persistHistoryEntry = async () => { throw new Error('storage unavailable'); };
-    const message = { id: 1, chat_id: 7, sender_public_id: 'alice',
+    const message = { delivery_id: 'a'.repeat(32), id: 1, chat_id: 7, sender_public_id: 'alice',
       client_message_id: 'uuid', ciphertext: 'hello', created_at: '2026-09-26T02:00:00Z' };
     await processMessages([message]);
   })()`);
@@ -92,9 +92,72 @@ test('failed local persistence can retry without acknowledging an unsaved messag
   assert.equal(run('seenMessageIds.size'), 0);
   await run(`(async () => {
     persistHistoryEntry = async () => {};
-    await processMessages([{ id: 1, chat_id: 7, sender_public_id: 'alice',
+    await processMessages([{ delivery_id: 'a'.repeat(32), id: 1, chat_id: 7, sender_public_id: 'alice',
       client_message_id: 'uuid', ciphertext: 'hello', created_at: '2026-09-26T02:00:00Z' }]);
   })()`);
   assert.equal(run('pendingReadsByChat.get(7).size'), 1);
   assert.equal(run('messagesByChat.get(7).filter(e => e.kind === "theirs").length'), 1);
+});
+
+test('exact acknowledgements retain colliding group identities and retry lost responses', async () => {
+  const run = client();
+  await run(`(async () => {
+    globalThis.calls = [];
+    api = async (path, options) => {
+      calls.push({ path, body: JSON.parse(options.body) });
+      throw new Error('response lost');
+    };
+    for (const [sender, delivery] of [['alice', 'a'], ['bob', 'b']]) {
+      await processMessages([{ id: 1, delivery_id: delivery.repeat(32), chat_id: 7,
+        sender_public_id: sender, client_message_id: 'collision', ciphertext: sender }]);
+    }
+    await processReceipts([{ id: 1, delivery_id: 'c'.repeat(32), chat_id: 7,
+      reader_public_id: 'bob', client_message_id: 'outbound' }]);
+  })()`);
+  await assert.rejects(run('flushAcknowledgements()'), /response lost/);
+  assert.equal(run('pendingReadsByChat.get(7).size'), 2);
+  await run(`api = async (path, options) => calls.push({ path, body: JSON.parse(options.body) });
+    flushAcknowledgements()`);
+  const calls = JSON.parse(run('JSON.stringify(calls)'));
+  assert.equal(calls[0].path, '/api/v1/chats/7/read/exact');
+  assert.deepEqual(calls[1], calls[0]);
+  assert.deepEqual(calls[1].body.messages.map(m => m.sender_public_id), ['alice', 'bob']);
+  assert.equal(calls[2].path, '/api/v1/ack/exact');
+  assert.deepEqual(calls[2].body, { receipts: [{ delivery_id: 'c'.repeat(32),
+    chat_id: 7, client_message_id: 'outbound', reader_public_id: 'bob' }] });
+  assert.equal(run('pendingReadsByChat.size + pendingReceiptIds.size'), 0);
+});
+
+test('batches are bounded and receipt failures keep only unfinished acknowledgements', async () => {
+  const run = client();
+  await run(`(async () => {
+    for (let i = 0; i < 205; i++) {
+      await processReceipts([{ id: i, delivery_id: i.toString(16).padStart(32, '0'),
+        chat_id: 7, reader_public_id: 'bob', client_message_id: 'm-' + i }]);
+    }
+    globalThis.calls = [];
+    api = async (path, options) => {
+      calls.push(JSON.parse(options.body));
+      if (calls.length === 2) throw new Error('offline');
+    };
+  })()`);
+  await assert.rejects(run('flushAcknowledgements()'), /offline/);
+  assert.equal(run('pendingReceiptIds.size'), 105);
+  await run('flushAcknowledgements()');
+  assert.deepEqual(JSON.parse(run('JSON.stringify(calls.map(c => c.receipts.length))')), [100, 100, 100, 5]);
+  assert.equal(run('pendingReceiptIds.size'), 0);
+});
+
+test('older servers cannot trigger fallback to ambiguous deletion endpoints', async () => {
+  const run = client();
+  await run(`processMessages([{ id: 1, chat_id: 7, sender_public_id: 'alice',
+    client_message_id: 'legacy', ciphertext: 'stored' }])`);
+  assert.equal(run('pendingReadsByChat.size'), 0);
+  await run(`queueRead({ delivery_id: 'a'.repeat(32), chat_id: 7,
+    sender_public_id: 'alice', client_message_id: 'm' });
+    globalThis.paths = [];
+    api = async (path) => { paths.push(path); throw new Error('404'); };`);
+  await assert.rejects(run('flushAcknowledgements()'), /404/);
+  assert.deepEqual(JSON.parse(run('JSON.stringify(paths)')), ['/api/v1/chats/7/read/exact']);
+  assert.equal(run('pendingReadsByChat.get(7).size'), 1);
 });

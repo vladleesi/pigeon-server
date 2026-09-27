@@ -106,6 +106,7 @@ class SendMessageResponse(TimestampedPayload):
 
 class IncomingMessage(TimestampedPayload):
     id: int
+    delivery_id: str
     client_message_id: str
     chat_id: int
     sender_public_id: str
@@ -115,6 +116,7 @@ class IncomingMessage(TimestampedPayload):
 
 class IncomingReadReceipt(TimestampedPayload):
     id: int
+    delivery_id: str
     client_message_id: str
     chat_id: int
     reader_public_id: str
@@ -133,6 +135,37 @@ class AckRequest(BaseModel):
 
 class MarkReadRequest(BaseModel):
     client_message_ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class MessageReference(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    delivery_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    chat_id: int = Field(..., gt=0)
+    sender_public_id: str = Field(..., min_length=1, max_length=64)
+    client_message_id: str = Field(..., min_length=1, max_length=64)
+
+
+class ReceiptReference(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    delivery_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    chat_id: int = Field(..., gt=0)
+    reader_public_id: str = Field(..., min_length=1, max_length=64)
+    client_message_id: str = Field(..., min_length=1, max_length=64)
+
+
+class ExactAckRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    messages: list[MessageReference] = Field(default_factory=list, max_length=100)
+    receipts: list[ReceiptReference] = Field(default_factory=list, max_length=100)
+
+
+class ExactMarkReadRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    messages: list[MessageReference] = Field(..., min_length=1, max_length=100)
 
 
 # ---------- admin API ----------

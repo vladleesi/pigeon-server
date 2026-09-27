@@ -6,8 +6,9 @@ from app.schemas import IncomingMessage, IncomingReadReceipt, SendMessageRespons
 def test_sqlite_naive_timestamps_are_serialized_as_utc():
     fields = dict(client_message_id="uuid", created_at=datetime(2026, 9, 26, 2))
     payloads = [
-        IncomingMessage(**fields, id=1, chat_id=1, sender_public_id="a", ciphertext="eA=="),
-        IncomingReadReceipt(**fields, id=1, chat_id=1, reader_public_id="b"),
+        IncomingMessage(**fields, delivery_id="a" * 32, id=1, chat_id=1,
+                        sender_public_id="a", ciphertext="eA=="),
+        IncomingReadReceipt(**fields, delivery_id="a" * 32, id=1, chat_id=1, reader_public_id="b"),
         SendMessageResponse(**fields, recipients=["b"]),
     ]
     for payload in payloads:

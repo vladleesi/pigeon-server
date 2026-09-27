@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -141,9 +142,13 @@ class PendingMessage(Base):
     __tablename__ = "pending_messages"
     __table_args__ = (
         Index("ix_pending_recipient_chat", "recipient_id", "chat_id"),
+        Index("ix_pending_messages_delivery_id", "delivery_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[str] = mapped_column(
+        String(32), default=lambda: secrets.token_hex(16), nullable=False
+    )
     client_message_id: Mapped[str] = mapped_column(String(64), nullable=False)
     chat_id: Mapped[int] = mapped_column(
         ForeignKey("chats.id", ondelete="CASCADE"), nullable=False
@@ -175,9 +180,13 @@ class ReadReceipt(Base):
     __tablename__ = "read_receipts"
     __table_args__ = (
         Index("ix_read_receipts_sender", "sender_id"),
+        Index("ix_read_receipts_delivery_id", "delivery_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[str] = mapped_column(
+        String(32), default=lambda: secrets.token_hex(16), nullable=False
+    )
     client_message_id: Mapped[str] = mapped_column(String(64), nullable=False)
     chat_id: Mapped[int] = mapped_column(
         ForeignKey("chats.id", ondelete="CASCADE"), nullable=False

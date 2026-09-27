@@ -6,7 +6,7 @@ import base64
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -21,9 +21,12 @@ from ..models import (
 from ..schemas import (
     AckRequest,
     ChatInfo,
+    ExactAckRequest,
+    ExactMarkReadRequest,
     IncomingMessage,
     IncomingReadReceipt,
     MarkReadRequest,
+    MessageReference,
     PollResponse,
     SendMessageRequest,
     SendMessageResponse,
@@ -130,6 +133,7 @@ async def send_message(
                     "type": "message",
                     "message": IncomingMessage(
                         id=row.id,
+                        delivery_id=row.delivery_id,
                         client_message_id=row.client_message_id,
                         chat_id=row.chat_id,
                         sender_public_id=user.public_id,
@@ -163,6 +167,7 @@ async def _fetch_poll(session: AsyncSession, user: User) -> PollResponse:
         incoming.append(
             IncomingMessage(
                 id=msg.id,
+                delivery_id=msg.delivery_id,
                 client_message_id=msg.client_message_id,
                 chat_id=msg.chat_id,
                 sender_public_id=sender.public_id,
@@ -182,6 +187,7 @@ async def _fetch_poll(session: AsyncSession, user: User) -> PollResponse:
     incoming_receipts = [
         IncomingReadReceipt(
             id=r.id,
+            delivery_id=r.delivery_id,
             client_message_id=r.client_message_id,
             chat_id=r.chat_id,
             reader_public_id=r.reader_public_id,
@@ -256,20 +262,84 @@ async def mark_read(
 
     # Match pending rows for this chat/recipient and the given client_message_ids.
     result = await session.execute(
-        select(PendingMessage)
+        delete(PendingMessage)
         .where(
             PendingMessage.chat_id == chat.id,
             PendingMessage.recipient_id == user.id,
             PendingMessage.client_message_id.in_(payload.client_message_ids),
         )
+        .returning(PendingMessage)
     )
     msgs = list(result.scalars().all())
+    return await _finish_read(session, user, msgs)
+
+
+def _message_match(ref: MessageReference):
+    return and_(
+        PendingMessage.delivery_id == ref.delivery_id,
+        PendingMessage.chat_id == ref.chat_id,
+        PendingMessage.client_message_id == ref.client_message_id,
+        PendingMessage.sender_id.in_(select(User.id).where(User.public_id == ref.sender_public_id)),
+    )
+
+
+@router.post("/ack/exact")
+async def ack_exact(
+    payload: ExactAckRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
+    """Delete only the identified deliveries owned by the authenticated user."""
+    messages = receipts = 0
+    if payload.messages:
+        result = await session.execute(delete(PendingMessage).where(
+            PendingMessage.recipient_id == user.id,
+            or_(*(_message_match(ref) for ref in payload.messages)),
+        ))
+        messages = result.rowcount or 0
+    if payload.receipts:
+        result = await session.execute(delete(ReadReceipt).where(
+            ReadReceipt.sender_id == user.id,
+            or_(*(and_(
+                ReadReceipt.delivery_id == ref.delivery_id,
+                ReadReceipt.chat_id == ref.chat_id,
+                ReadReceipt.client_message_id == ref.client_message_id,
+                ReadReceipt.reader_public_id == ref.reader_public_id,
+            ) for ref in payload.receipts)),
+        ))
+        receipts = result.rowcount or 0
+    await session.commit()
+    return {"deleted_messages": messages, "deleted_receipts": receipts}
+
+
+@router.post("/chats/{chat_id}/read/exact")
+async def mark_read_exact(
+    chat_id: int,
+    payload: ExactMarkReadRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
+    await ensure_chat_member(session, chat_id, user)
+    if any(ref.chat_id != chat_id for ref in payload.messages):
+        raise HTTPException(status_code=422, detail="message chat does not match route")
+    # DELETE RETURNING makes row consumption atomic across concurrent tabs and
+    # workers. Only the winner creates a receipt, in the same transaction.
+    result = await session.execute(delete(PendingMessage).where(
+        PendingMessage.recipient_id == user.id,
+        or_(*(_message_match(ref) for ref in payload.messages)),
+    ).returning(PendingMessage))
+    return await _finish_read(session, user, list(result.scalars().all()))
+
+
+async def _finish_read(
+    session: AsyncSession, user: User, msgs: list[PendingMessage],
+) -> dict[str, int]:
     if not msgs:
+        await session.commit()
         return {"marked": 0}
 
     now = datetime.now(timezone.utc)
     receipts: list[ReadReceipt] = []
-    ids_to_delete: list[int] = []
     for msg in msgs:
         receipts.append(
             ReadReceipt(
@@ -281,16 +351,10 @@ async def mark_read(
                 created_at=now,
             )
         )
-        ids_to_delete.append(msg.id)
 
     session.add_all(receipts)
-    if ids_to_delete:
-        await session.execute(
-            delete(PendingMessage).where(PendingMessage.id.in_(ids_to_delete))
-        )
+    await session.flush()
     await session.commit()
-    for r in receipts:
-        await session.refresh(r)
 
     # Push receipts to online senders.
     for r in receipts:
@@ -301,6 +365,7 @@ async def mark_read(
                     "type": "read",
                     "read": IncomingReadReceipt(
                         id=r.id,
+                        delivery_id=r.delivery_id,
                         client_message_id=r.client_message_id,
                         chat_id=r.chat_id,
                         reader_public_id=r.reader_public_id,

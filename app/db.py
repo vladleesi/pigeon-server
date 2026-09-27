@@ -60,6 +60,19 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Delivery identities survive row-ID reuse and remain stable across
+        # restarts/backups. Existing queued rows are backfilled exactly once.
+        for table in ("pending_messages", "read_receipts"):
+            columns = await conn.execute(text(f"PRAGMA table_info({table})"))
+            if "delivery_id" not in {row[1] for row in columns}:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN delivery_id VARCHAR(32)"))
+            await conn.execute(text(
+                f"UPDATE {table} SET delivery_id = lower(hex(randomblob(16))) "
+                "WHERE delivery_id IS NULL"
+            ))
+            await conn.execute(text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS ix_{table}_delivery_id ON {table}(delivery_id)"
+            ))
         # Lightweight in-place migration for installations created before
         # invite revocation was tied to client sessions. Existing inactive
         # links are treated as revoked once, which safely invalidates legacy
