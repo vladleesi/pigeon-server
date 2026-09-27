@@ -78,6 +78,7 @@ a:hover { text-decoration: underline; }
 }
 
 h1 { margin-top: 0; }
+.links-container { max-width: 1600px; }
 
 .card {
   background: var(--card);
@@ -108,21 +109,93 @@ form.inline { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-end
 form.inline label { flex: 0 0 auto; }
 form.inline label.grow { flex: 1 1 200px; }
 
-label { display: flex; flex-direction: column; gap: .3rem; font-size: .9rem; }
+.create-link-card { padding: 1rem; }
+.create-link-card h2 { margin: 0 0 .75rem; font-size: 1.1rem; }
+.create-link-card > p { margin: .65rem 0 0; line-height: 1.4; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .85rem; }
+.section-heading h2 { margin: 0; }
+.section-heading button { flex-shrink: 0; font-size: .8rem; padding: .35rem .65rem; }
+.created-invite:has(#created-invite-details[hidden]) .section-heading { margin-bottom: 0; }
+.created-invite-fields { display: grid; gap: .65rem; max-width: 44rem; }
+#created-invite-context { margin: .65rem 0 0; }
+#created-invite-context:not([hidden]) + #created-invite-details { margin-top: .85rem; }
+.bundle-description { max-width: 60ch; line-height: 1.5; }
+.created-invite-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: .6rem;
+}
+.created-invite-field label, .created-invite-field input { min-width: 0; }
+.created-invite-field input { width: 100%; min-height: 2.25rem; }
+.created-invite-field button { min-height: 2.25rem; min-width: 5rem; }
+#created-invite-details > p { margin: .75rem 0 0; line-height: 1.5; }
+form.invite-form {
+  display: grid;
+  gap: .65rem;
+}
+.invite-form-row {
+  display: grid;
+  gap: .75rem;
+  align-items: start;
+}
+.invite-form-details {
+  display: flex;
+  flex-wrap: wrap;
+}
+.invite-form-details > label { flex: 1 1 16rem; }
+.invite-form-details > .invite-type { flex: 0 1 10rem; }
+.invite-form-settings {
+  display: flex;
+  flex-wrap: wrap;
+}
+.invite-form-settings > .invite-expiry { flex: 0 1 11rem; }
+.invite-form-settings > .invite-limit { flex: 0 1 12rem; }
+.invite-form-settings > .invite-protection { flex: 0 1 13.5rem; }
+.invite-form-password { grid-template-columns: minmax(0, 1fr); max-width: 44rem; }
+.invite-form label, .created-invite-field label { min-width: 0; gap: .25rem; font-size: .82rem; }
+.invite-form label > span, .created-invite-field label > span { line-height: 1.4; }
+.invite-form input, .invite-form select, .created-invite-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.25rem;
+  padding: .4rem .6rem;
+  font-size: .875rem;
+  line-height: 1.4;
+}
+.invite-form small { color: var(--muted); line-height: 1.45; }
+.invite-form select { padding-right: 2.25rem; }
+.invite-form small[role="alert"] { color: var(--danger); }
+.invite-form-actions {
+  /* Match the field label's line height and gap, not its helper text. */
+  padding-top: calc(.82rem * 1.4 + .25rem);
+}
+.invite-form-actions button { min-height: 2.25rem; }
+
+@media (max-width: 400px) {
+  .invite-form-settings > :is(.invite-expiry, .invite-limit, .invite-protection) { flex-basis: 100%; }
+  .invite-form-actions { flex-basis: 100%; }
+  .invite-form-actions { padding-top: 0; }
+}
+
+label { display: flex; flex-direction: column; gap: .25rem; font-size: .82rem; }
 label span { color: var(--muted); }
 label.check { flex-direction: row; align-items: center; gap: .5rem; }
 
 input, select, textarea {
-  padding: .55rem .7rem;
+  padding: .4rem .6rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
   color: var(--fg);
-  font-size: .95rem;
+  font-family: inherit;
+  font-size: .875rem;
+  line-height: 1.4;
+  min-height: 2.25rem;
   min-width: 180px;
 }
 
-input[type="checkbox"] { min-width: auto; }
+input[type="checkbox"] { min-width: auto; min-height: 0; }
 
 select {
   appearance: none;
@@ -179,6 +252,38 @@ table.data .date-cell { white-space: nowrap; }
 table.data th, table.data td { border: 0; }
 table.data tbody tr + tr > td { border-top: 1px solid var(--border); }
 .table-scroll { overflow-x: auto; }
+table.links-table { table-layout: fixed; font-size: .85rem; }
+.links-select-column { width: 2.25rem; }
+.links-type-column { width: 9rem; }
+.links-chat-column { width: 5rem; }
+.links-uses-column { width: 6rem; }
+.links-status-column { width: 6rem; }
+.links-date-column { width: 10rem; }
+/* 60% of the former URL space: 86% of the table minus 53.75rem of fixed columns. */
+.links-url-column { width: calc(51.6% - 32.25rem); }
+.links-note-column { width: auto; }
+.links-actions-column { width: 5.5rem; }
+table.links-table th, table.links-table td { overflow-wrap: anywhere; white-space: normal; }
+table.links-table .date-cell, table.links-table td[data-label="Type"] { white-space: nowrap; }
+.links-table td[data-label="Type"] .badge { white-space: nowrap; }
+.links-table .badge { white-space: normal; margin-bottom: .2rem; }
+.links-table td[data-label="Type"] .badge { display: block; width: fit-content; }
+table.links-table td:last-child { white-space: normal; text-align: left; }
+.links-table .row-actions { flex-wrap: wrap; justify-content: flex-start; gap: .3rem; }
+.invite-url { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: .85em; }
+@media (max-width: 1300px) {
+  table.links-table, .links-table tbody { display: block; }
+  .links-table thead { display: none; }
+  .links-table colgroup { display: none; }
+  .links-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; padding: .75rem 0; }
+  .links-table tbody tr + tr { border-top: 1px solid var(--border); }
+  table.links-table tbody tr > td { display: block; border: 0; padding: .25rem; }
+  .links-table td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font-size: .8rem; margin-bottom: .25rem; }
+  .links-table td[data-label="Type"], .links-table td[data-label="URL"], .links-table td[data-label="Actions"] { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .links-table tbody tr { grid-template-columns: minmax(0, 1fr); }
+}
 table.data td:last-child { white-space: nowrap; text-align: right; }
 .row-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .row-actions form, .table-toolbar form { margin: 0; }

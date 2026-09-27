@@ -7,7 +7,7 @@ import binascii
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 def _decode_b64(value: str) -> bytes:
@@ -30,6 +30,8 @@ class Base64Field(str):
 class LinkActivateRequest(BaseModel):
     public_key: str = Field(..., description="Client X25519 public key as base64 (32 bytes).")
     display_name: str | None = Field(default=None, max_length=64)
+    password: SecretStr | None = None
+    resume_credential: SecretStr | None = None
 
     @field_validator("public_key")
     @classmethod
@@ -200,6 +202,7 @@ class ExportedUser(BaseModel):
 class ExportedChatMember(BaseModel):
     public_id: str
     joined_at: datetime
+    resume_hash: str | None = None
 
 
 class ExportedChat(BaseModel):
@@ -216,6 +219,10 @@ class ExportedLink(BaseModel):
     max_uses: int
     uses_count: int
     is_active: bool
+    password_required: bool = False
+    password_hash: str | None = None
+    failed_attempts: int = 0
+    failed_window_started_at: datetime | None = None
     note: str | None
     created_at: datetime
     expires_at: datetime | None

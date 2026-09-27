@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..deps import resolve_client_user
-from ..models import User
+from ..invite_security import require_secure_transport
+from ..models import Link, User
 from ..schemas import LinkActivateRequest, LinkActivateResponse, _decode_b64
 from ..security import create_client_token
 from ..services import activate_link, load_chat_info, user_to_participant
@@ -29,9 +31,16 @@ async def _current_user_if_any(
 async def activate(
     token: str,
     payload: LinkActivateRequest,
+    request: Request,
     authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> LinkActivateResponse:
+    # SELECT FOR UPDATE is ignored by SQLite. Acquire its write reservation
+    # before any auth/membership reads, also across multiple server processes.
+    await session.execute(text("BEGIN IMMEDIATE"))
+    link = await session.scalar(select(Link).where(Link.token == token))
+    if payload.password is not None or (link is not None and link.password_hash is not None):
+        require_secure_transport(request)
     existing = await _current_user_if_any(session, authorization)
 
     pub_key = _decode_b64(payload.public_key)
@@ -47,6 +56,11 @@ async def activate(
         public_key=pub_key,
         display_name=payload.display_name,
         current_user=existing,
+        password=payload.password.get_secret_value() if payload.password is not None else None,
+        resume_credential=(
+            payload.resume_credential.get_secret_value()
+            if payload.resume_credential is not None else None
+        ),
     )
 
     chat_info = await load_chat_info(session, chat)

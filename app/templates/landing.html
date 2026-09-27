@@ -10,6 +10,8 @@
     <p>This is a <b>group</b> invite link.</p>
     {% endif %}
     <p>Open it in a compatible Pigeon client to activate.</p>
+    {% if details.password_required %}<p>The room also requires a phrase or password. Ask the creator for it separately.</p>{% endif %}
+    <p>Opening this page does not reserve a participant slot.</p>
     <p><a class="button primary" href="/client?invite={{ token }}">Open test web client</a></p>
     <p class="muted small">The bundled browser client is intended for testing and is not independently audited.</p>
     <div class="token-box">
@@ -18,7 +20,8 @@
   {% elif status == "expired" %}
     <p>This link expired. Ask your administrator for a fresh invite.</p>
   {% elif status == "used" %}
-    <p>This link was fully consumed. Ask your administrator for a fresh invite.</p>
+    <p>This room is sealed. All participant slots are filled.</p>
+    <p><a class="button primary" href="/client?invite={{ token }}">Reconnect from your joined browser</a></p>
   {% elif status == "revoked" %}
     <p>This link was revoked by an administrator.</p>
   {% else %}

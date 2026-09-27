@@ -27,6 +27,7 @@ engine = create_async_engine(
     echo=False,
     future=True,
     pool_pre_ping=True,
+    connect_args={"timeout": 30},
 )
 
 SessionLocal = async_sessionmaker(
@@ -65,6 +66,16 @@ async def init_db() -> None:
         # JWTs that did not carry an invite id.
         columns = await conn.execute(text("PRAGMA table_info(links)"))
         column_names = {row[1] for row in columns}
+        for name, sql_type in (
+            ("password_hash", "TEXT"),
+            ("failed_attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ("failed_window_started_at", "DATETIME"),
+        ):
+            if name not in column_names:
+                await conn.execute(text(f"ALTER TABLE links ADD COLUMN {name} {sql_type}"))
+        member_columns = await conn.execute(text("PRAGMA table_info(chat_members)"))
+        if "resume_hash" not in {row[1] for row in member_columns}:
+            await conn.execute(text("ALTER TABLE chat_members ADD COLUMN resume_hash VARCHAR(64)"))
         if "is_deleted" not in column_names:
             await conn.execute(text(
                 "ALTER TABLE links ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0"

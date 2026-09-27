@@ -1,52 +1,117 @@
 {% extends "base.html" %}
 {% from "admin_table.html" import selection_toolbar, select_all, select_row %}
 {% block title %}Links · Pigeon{% endblock %}
+{% block container_class %}links-container{% endblock %}
 {% block content %}
 <h1>Invite links</h1>
+<section id="created-invite-panel" class="card created-invite" aria-labelledby="created-invite-heading" {% if not created_invite %}hidden{% endif %}>
+  <div class="section-heading">
+    <h2 id="created-invite-heading" tabindex="-1">Invite created</h2>
+    <button type="button" data-toggle-invite aria-expanded="true" aria-controls="created-invite-details">Hide details</button>
+  </div>
+  <p id="created-invite-context" class="muted small" hidden></p>
+  <div id="created-invite-details">
+  <div class="created-invite-fields">
+    <div class="created-invite-field">
+      <label><span>Invite link</span> <input id="created-invite-url" type="text" readonly value="{{ created_invite.url if created_invite else '' }}"></label>
+      <button type="button" data-copy-invite="created-invite-url" aria-label="Copy invite link">Copy</button>
+    </div>
+    <div class="created-invite-field">
+      <label><span>Room password</span> <input id="created-invite-password" type="text" readonly value="{{ created_invite.password if created_invite else '' }}" autocomplete="off"></label>
+      <button type="button" data-copy-invite="created-invite-password" aria-label="Copy room password" aria-live="polite">Copy</button>
+    </div>
+  </div>
+  <p id="invite-copy-status" class="muted small" role="status" hidden></p>
+  <p id="invite-save-status" class="muted small" role="status">Share the password separately from the link.</p>
+  </div>
+</section>
 {% if link_error %}<p role="alert" class="badge bad">{{ link_error }}</p>{% endif %}
 
-<section class="card">
+<section class="card create-link-card">
   <h2>Create link</h2>
-  <script src="/static/link-form.js" defer></script>
+  <script src="/static/link-form.js?v=6" defer></script>
+  <script src="/static/invite-vault.js?v=1" defer></script>
+  <script src="/static/admin-links.js?v=3" defer></script>
+  <p id="create-link-error" class="muted small" role="alert" hidden></p>
   {% set values = form_values|default({}) %}
   {% set errors = field_errors|default({}) %}
-  <form id="create-link-form" method="post" action="/admin/links" class="inline">
-    <label>
-      <span>Type</span>
-      <select name="link_type" required>
-        <option value="personal">Personal (1:1)</option>
-        <option value="group" {% if values.get('link_type') == 'group' %}selected{% endif %}>Group</option>
-      </select>
-    </label>
-    <label>
-      <span>Group title (optional)</span>
-      <input type="text" name="group_title" placeholder="Group links only" value="{{ values.get('group_title', '') }}">
-    </label>
-    <label>
-      <span>Expires in hours (optional)</span>
-      <input id="expires-in-hours" type="number" name="expires_in_hours" min="1" max="8760" step="1"
-             value="{{ values.get('expires_in_hours', '') }}" aria-describedby="expiry-error"
-             aria-invalid="{{ 'true' if errors.get('expires_in_hours') else 'false' }}">
-      <small id="expiry-error" role="alert" style="color: #c0392b" {% if not errors.get('expires_in_hours') %}hidden{% endif %}>{{ errors.get('expires_in_hours', '') }}</small>
-    </label>
-    <label class="grow">
-      <span>Note</span>
-      <input type="text" name="note" maxlength="256" value="{{ values.get('note', '') }}">
-    </label>
-    <button type="submit" class="primary">Create</button>
+  <form id="create-link-form" method="post" action="/admin/links" class="invite-form">
+    <div class="invite-form-row invite-form-details">
+      <label class="invite-type">
+        <span>Type</span>
+        <select id="link-type" name="link_type" required>
+          <option value="personal">Personal (1:1)</option>
+          <option value="group" {% if values.get('link_type') == 'group' %}selected{% endif %}>Group</option>
+        </select>
+      </label>
+      <label id="group-title-field" {% if values.get('link_type') != 'group' %}hidden{% endif %}>
+        <span>Group title (optional)</span>
+        <input id="group-title" type="text" name="group_title" placeholder="Group title" value="{{ values.get('group_title', '') }}" {% if values.get('link_type') != 'group' %}disabled{% endif %}>
+      </label>
+      <label>
+        <span>Note</span>
+        <input type="text" name="note" maxlength="256" value="{{ values.get('note', '') }}">
+      </label>
+    </div>
+    <div class="invite-form-row invite-form-settings">
+      <label class="invite-expiry">
+        <span>Expiry hours (optional)</span>
+        <input id="expires-in-hours" type="number" name="expires_in_hours" min="1" max="8760" step="1"
+               value="{{ values.get('expires_in_hours', '') }}" aria-describedby="expiry-error"
+               aria-invalid="{{ 'true' if errors.get('expires_in_hours') else 'false' }}">
+        <small id="expiry-error" role="alert" {% if not errors.get('expires_in_hours') %}hidden{% endif %}>{{ errors.get('expires_in_hours', '') }}</small>
+      </label>
+      <label id="participant-limit-field" class="invite-limit" {% if values.get('link_type') != 'group' %}hidden{% endif %}>
+        <span>Participant limit (optional)</span>
+        <input id="participant-limit" type="number" name="participant_limit" min="2" max="1000" step="1"
+               value="{{ values.get('participant_limit', '') }}" aria-describedby="participant-limit-error"
+               aria-invalid="{{ 'true' if errors.get('participant_limit') else 'false' }}">
+        <small id="participant-limit-error" role="alert" {% if not errors.get('participant_limit') %}hidden{% endif %}>{{ errors.get('participant_limit', '') }}</small>
+      </label>
+      <label class="invite-protection">
+        <span>Room protection</span>
+        <select id="password-mode" name="password_mode" aria-describedby="room-password-error">
+          <option value="none">No password</option>
+          <option value="generated" {% if values.get('password_mode') == 'generated' %}selected{% endif %}>Generated password</option>
+          <option value="custom" {% if values.get('password_mode') == 'custom' %}selected{% endif %}>Custom phrase</option>
+        </select>
+      </label>
+      <div class="invite-form-actions">
+        <button type="submit" class="primary">Create</button>
+      </div>
+    </div>
+    <div id="custom-password-fields" class="invite-form-row invite-form-password"
+         {% if values.get('password_mode') != 'custom' and not errors.get('room_password') %}hidden{% endif %}>
+      <label>
+        <span>Custom phrase or password</span>
+        <input id="room-password" type="password" name="room_password" autocomplete="new-password"
+               maxlength="32" aria-describedby="room-password-help room-password-error"
+               aria-invalid="{{ 'true' if errors.get('room_password') else 'false' }}">
+        <small id="room-password-error" role="alert" {% if not errors.get('room_password') %}hidden{% endif %}>{{ errors.get('room_password', '') }}</small>
+        <small id="room-password-help">8–32 characters. Passwords are never included in invite links.</small>
+      </label>
+    </div>
   </form>
   <p class="muted small">
-    Personal links allow exactly two activations (two devices) then auto-close.
-    Group links stay open; each activation joins the same shared chat.
+    Personal: 2 participants. Groups: optional limit. Rooms seal when full; reconnects reuse a slot.
   </p>
 </section>
 
-<section class="card">
-  <h2>Existing links</h2>
+<section id="existing-links" class="card">
+  <div class="section-heading">
+    <h2>Existing links</h2>
+    <button id="refresh-links" type="button">Refresh list</button>
+  </div>
+  <p id="links-refresh-status" class="muted small" role="status" hidden></p>
   {% if links %}
   {{ selection_toolbar('links', 'Delete the selected links? Their sessions will stop working. This cannot be undone.', 'Delete revoked / expired', 'Delete revoked and expired links? Their sessions will stop working. This cannot be undone.') }}
-  <div class="table-scroll">
-  <table class="data">
+  <table class="data links-table">
+    <colgroup>
+      <col class="links-select-column"><col class="links-type-column"><col class="links-url-column">
+      <col class="links-chat-column"><col class="links-uses-column"><col class="links-status-column">
+      <col class="links-date-column"><col class="links-date-column">
+      <col class="links-note-column"><col class="links-actions-column">
+    </colgroup>
     <thead>
       <tr>
         {{ select_all('links') }}
@@ -58,37 +123,38 @@
         <th>Created</th>
         <th>Expires</th>
         <th>Note</th>
-        <th></th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
       {% for link in links %}
-      <tr>
+      <tr data-link-id="{{ link.id }}">
         {{ select_row('links', link.id) }}
-        <td>
+        <td data-label="Type">
           {% if link.link_type == "personal" %}<span class="badge">personal</span>
           {% else %}<span class="badge alt">group</span>{% endif %}
+          {% if link.password_required %}<span class="badge">password protected</span>{% endif %}
         </td>
-        <td>
-          <input class="copy" type="text" readonly value="{{ link.url }}" onclick="this.select()">
+        <td data-label="URL">
+          <a class="invite-url" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.url }}</a>
         </td>
-        <td>
+        <td data-label="Chat" data-live-field="chat">
           {% if link.chat_id %}<span class="pill">#{{ link.chat_id }}</span>{% else %}-{% endif %}
         </td>
-        <td>
+        <td data-label="Uses" data-live-field="uses">
           {{ link.uses_count }}{% if link.max_uses %} / {{ link.max_uses }}{% endif %}
         </td>
-        <td>
+        <td data-label="Status" data-live-field="status">
           {% if link.is_expired %}<span class="badge bad">expired</span>
           {% elif link.is_revoked %}<span class="badge bad">revoked</span>
           {% elif link.is_full %}<span class="badge">fully used</span>
           {% elif link.is_active %}<span class="badge ok">active</span>
           {% else %}<span class="badge">inactive</span>{% endif %}
         </td>
-        <td class="date-cell">{{ link.created_at|fmt_dt }}</td>
-        <td class="date-cell">{{ link.expires_at|fmt_dt }}</td>
-        <td>{{ link.note or "-" }}</td>
-        <td>
+        <td class="date-cell" data-label="Created">{{ link.created_at|fmt_dt }}</td>
+        <td class="date-cell" data-label="Expires">{{ link.expires_at|fmt_dt }}</td>
+        <td data-label="Note">{{ link.note or "-" }}</td>
+        <td data-label="Actions" data-live-field="actions">
           <div class="row-actions">
           {% if not link.is_revoked and not link.is_expired %}
           <form method="post" action="/admin/links/{{ link.id }}/revoke">
@@ -109,7 +175,6 @@
       {% endfor %}
     </tbody>
   </table>
-  </div>
   {% else %}
   <p class="muted">No links yet.</p>
   {% endif %}

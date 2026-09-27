@@ -19,6 +19,8 @@ const elements = {
   error: document.querySelector("#error-message"),
   identityLabel: document.querySelector("#identity-label"),
   inviteToken: document.querySelector("#invite-token"),
+  roomPassword: document.querySelector("#join-password"),
+  activationError: document.querySelector("#activation-error"),
   messageForm: document.querySelector("#message-form"),
   messageInput: document.querySelector("#message-input"),
   messageList: document.querySelector("#message-list"),
@@ -785,8 +787,21 @@ elements.displayName.addEventListener("input", () => {
   elements.displayName.setAttribute("aria-invalid", "false");
 });
 
+async function prepareInviteResume(token) {
+  identity.inviteCredentials ||= {};
+  if (!identity.inviteCredentials[token]) {
+    identity.inviteCredentials[token] = bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  // Persist before sending: even a lost HTTP response must be safe to retry.
+  await writeIdentity(identity);
+  return identity.inviteCredentials[token];
+}
+
 elements.activationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  elements.activationError.hidden = true;
+  elements.roomPassword.setAttribute("aria-invalid", "false");
   const displayName = elements.displayName.value.trim();
   if (!displayName || displayName.length > 64) {
     showNameError();
@@ -802,12 +817,17 @@ elements.activationForm.addEventListener("submit", async (event) => {
   try {
     if (!identity) identity = await generateIdentity();
     await ensureStorageKey();
+    const resumeCredential = await prepareInviteResume(token);
     const previousPublicId = identity.publicId;
+    const password = elements.roomPassword.value;
+    elements.roomPassword.value = "";
     const result = await api(`/api/v1/links/${encodeURIComponent(token)}/activate`, {
       method: "POST",
       body: JSON.stringify({
         public_key: identity.publicKey,
         display_name: displayName,
+        password: password || undefined,
+        resume_credential: resumeCredential,
       }),
     });
     if (previousPublicId && previousPublicId !== result.user.public_id) {
@@ -827,6 +847,9 @@ elements.activationForm.addEventListener("submit", async (event) => {
     selectChat(result.chat.id);
     showToast("Invite activated. This device key is stored locally.");
   } catch (error) {
+    elements.activationError.textContent = errorMessage(error);
+    elements.activationError.hidden = false;
+    elements.roomPassword.setAttribute("aria-invalid", "true");
     showToast(errorMessage(error), true);
   } finally {
     submitButton.disabled = false;

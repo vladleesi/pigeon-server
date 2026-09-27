@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .config import get_settings
+from .invite_security import authenticate_password, resume_digest
 from .models import (
     Chat,
     ChatMember,
@@ -81,77 +82,71 @@ async def activate_link(
     public_key: bytes,
     display_name: str | None,
     current_user: User | None = None,
+    password: str | None = None,
+    resume_credential: str | None = None,
 ) -> tuple[User, Chat, Link]:
-    """Handle invite-link activation.
-
-    If ``current_user`` is set, add that user to the chat/group.
-    Otherwise create a new user with the supplied public key.
-    """
+    """Authenticate before allocating a slot, under BEGIN IMMEDIATE on SQLite."""
 
     result = await session.execute(
         select(Link).where(Link.token == link_token).with_for_update()
     )
     link = result.scalar_one_or_none()
-    if link is None:
+    if link is None or link.is_deleted:
         raise HTTPException(status_code=404, detail="link not found")
-    if not link.is_active:
-        raise HTTPException(status_code=410, detail="link is no longer active")
+    if link.revoked_at is not None:
+        raise HTTPException(status_code=410, detail="link revoked")
     if _link_expired(link):
         link.is_active = False
         await session.commit()
         raise HTTPException(status_code=410, detail="link expired")
-    if link.max_uses and link.uses_count >= link.max_uses:
-        link.is_active = False
-        await session.commit()
-        raise HTTPException(status_code=410, detail="link fully used")
-
     chat = None
     if link.chat_id is not None:
         chat = await session.get(Chat, link.chat_id)
 
-    if link.link_type is LinkType.personal:
-        if chat is None:
-            chat = Chat(chat_type=ChatType.personal)
-            session.add(chat)
-            await session.flush()
-            link.chat_id = chat.id
-    else:  # group
-        if chat is None:
-            chat = Chat(chat_type=ChatType.group, title=None)
-            session.add(chat)
-            await session.flush()
-            link.chat_id = chat.id
+    credential_hash = resume_digest(resume_credential)
+    members = []
+    if chat is not None:
+        members = list((await session.scalars(
+            select(ChatMember).where(ChatMember.chat_id == chat.id)
+            .options(selectinload(ChatMember.user))
+        )).all())
+        for member in members:
+            authenticated = (
+                current_user is not None and member.user_id == current_user.id
+            ) or (credential_hash is not None and member.resume_hash == credential_hash)
+            if authenticated:
+                if member.user is None or not member.user.is_active:
+                    raise HTTPException(401, "invalid or revoked participant")
+                if member.user.public_key != public_key:
+                    raise HTTPException(409, "public_key mismatch with existing participant")
+                if member.resume_hash is None and credential_hash is not None:
+                    # Upgrade a legacy participant while its JWT authenticates it.
+                    member.resume_hash = credential_hash
+                # Sealing only blocks new admissions, never an authenticated reconnect.
+                await session.commit()
+                return member.user, chat, link
 
-    # Resolve user.
-    if current_user is None:
-        user = await _create_user(session, public_key, display_name)
-    else:
-        user = current_user
+    capacity = 2 if link.link_type is LinkType.personal else link.max_uses
+    if not link.is_active or (capacity and max(link.uses_count, len(members)) >= capacity):
+        raise HTTPException(410, "room sealed; reconnect with your saved session")
 
-    # Skip if already a member.
-    result = await session.execute(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat.id,
-            ChatMember.user_id == user.id,
+    await authenticate_password(session, link, password)
+    # A public key alone is not proof of identity. Never grant a reconnect based
+    # on public data, nor let a lost response consume the same device's next slot.
+    if any(m.user is not None and m.user.public_key == public_key for m in members):
+        raise HTTPException(
+            409, "This device has joined. Use its saved session or resume credential.",
         )
-    )
-    member = result.scalar_one_or_none()
-    if member is None:
-        # Personal chats cannot exceed two members.
-        if link.link_type is LinkType.personal:
-            count_result = await session.execute(
-                select(ChatMember).where(ChatMember.chat_id == chat.id)
-            )
-            existing = count_result.scalars().all()
-            if len(existing) >= 2:
-                raise HTTPException(
-                    status_code=410, detail="personal chat is already full"
-                )
-        session.add(ChatMember(chat_id=chat.id, user_id=user.id))
 
+    if chat is None:
+        chat = Chat(chat_type=ChatType(link.link_type.value))
+        session.add(chat)
+        await session.flush()
+        link.chat_id = chat.id
+    user = current_user or await _create_user(session, public_key, display_name)
+    session.add(ChatMember(chat_id=chat.id, user_id=user.id, resume_hash=credential_hash))
     link.uses_count += 1
-    # Personal links deactivate once fully consumed.
-    if link.link_type is LinkType.personal and link.uses_count >= link.max_uses:
+    if capacity and max(link.uses_count, len(members) + 1) >= capacity:
         link.is_active = False
 
     await session.commit()

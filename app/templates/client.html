@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <title>Pigeon test client</title>
   <link rel="stylesheet" href="/static/client.css?v=4">
-  <script src="/static/client.js?v=8" defer></script>
+  <script src="/static/client.js?v=9" defer></script>
 </head>
 <body>
   <header class="client-header">
@@ -50,7 +50,13 @@
                  aria-describedby="display-name-error">
           <small id="display-name-error" role="alert" hidden></small>
         </label>
-        <button class="button primary" type="submit">Activate securely</button>
+        <label>
+          Room phrase or password (if protected)
+          <input id="join-password" type="password" name="room_password" maxlength="128"
+                 autocomplete="off" aria-describedby="activation-error">
+        </label>
+        <small id="activation-error" role="alert" hidden></small>
+        <button class="button primary" type="submit">Join room</button>
         <button id="reconnect-session" class="button subtle" type="button" hidden>Reconnect saved session</button>
       </form>
     </section>

@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from ..db import get_session
 from ..deps import get_current_admin
+from ..invite_security import valid_verifier
 from ..models import (
     Admin,
     Chat,
@@ -82,6 +83,7 @@ async def export_bundle(
                     {
                         "public_id": m.user.public_id,
                         "joined_at": _dt_iso(m.joined_at),
+                        "resume_hash": m.resume_hash,
                     }
                     for m in c.members
                     if m.user is not None
@@ -99,6 +101,10 @@ async def export_bundle(
                 "max_uses": link.max_uses,
                 "uses_count": link.uses_count,
                 "is_active": link.is_active,
+                "password_required": link.password_hash is not None,
+                "password_hash": link.password_hash,
+                "failed_attempts": link.failed_attempts,
+                "failed_window_started_at": _dt_iso(link.failed_window_started_at),
                 "revoked_at": _dt_iso(link.revoked_at),
                 "note": link.note,
                 "created_at": _dt_iso(link.created_at),
@@ -146,6 +152,21 @@ async def import_bundle(
 
     if not isinstance(data, dict) or data.get("version") != 1:
         raise HTTPException(status_code=400, detail="unsupported bundle version")
+
+    # Validate before mutating anything. Never silently downgrade protected links.
+    for raw_link in data.get("links", []):
+        verifier = raw_link.get("password_hash")
+        protected = verifier is not None or raw_link.get("password_required")
+        if protected and not valid_verifier(verifier):
+            raise HTTPException(400, "Invalid or missing room password verifier.")
+    for raw_chat in data.get("chats", []):
+        for raw_member in raw_chat.get("members", []):
+            value = raw_member.get("resume_hash")
+            if value is not None and (
+                not isinstance(value, str) or len(value) != 64
+                or any(c not in "0123456789abcdef" for c in value)
+            ):
+                raise HTTPException(400, "Invalid participant resume verifier.")
 
     # Replace mode wipes mutable tables while admins remain untouched.
     if replace:
@@ -214,6 +235,7 @@ async def import_bundle(
                     user_id=user.id,
                     joined_at=_parse_dt(raw_member.get("joined_at"))
                     or datetime.now(timezone.utc),
+                    resume_hash=raw_member.get("resume_hash"),
                 )
             )
 
@@ -234,6 +256,9 @@ async def import_bundle(
             max_uses=int(raw_link.get("max_uses") or (2 if link_type is LinkType.personal else 0)),
             uses_count=int(raw_link.get("uses_count") or 0),
             is_active=bool(raw_link.get("is_active", True)),
+            password_hash=raw_link.get("password_hash"),
+            failed_attempts=max(0, int(raw_link.get("failed_attempts") or 0)),
+            failed_window_started_at=_parse_dt(raw_link.get("failed_window_started_at")),
             revoked_at=_parse_dt(raw_link.get("revoked_at")),
             note=raw_link.get("note"),
             created_at=_parse_dt(raw_link.get("created_at"))

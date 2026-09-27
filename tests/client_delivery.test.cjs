@@ -7,6 +7,7 @@ function client() {
   const element = { addEventListener() {} };
   const context = vm.createContext({
     TextEncoder, TextDecoder, DOMException,
+    crypto: require('node:crypto').webcrypto, btoa,
     document: { querySelector: () => element, addEventListener() {} },
     window: { addEventListener() {} },
   });
@@ -34,6 +35,31 @@ test('reused SQLite row IDs do not drop new messages or receipts', async () => {
   })()`);
   assert.equal(run('messagesByChat.get(7).filter(e => e.kind === "theirs").length'), 10);
   assert.equal(run('messagesByChat.get(7).filter(e => e.kind === "system").length'), 10);
+});
+
+test('invite retry credentials persist before admission and stay stable after a failed save', async () => {
+  const run = client();
+  await run(`(async () => {
+    identity = { publicKey: 'device-public-key' };
+    writeIdentity = async () => { throw new Error('storage unavailable'); };
+    try {
+      await prepareInviteResume('example-invite');
+      throw new Error('must not continue to admission');
+    } catch (error) {
+      if (error.message !== 'storage unavailable') throw error;
+    }
+  })()`);
+  const credential = run('identity.inviteCredentials["example-invite"]');
+  assert.match(credential, /^[A-Za-z0-9_-]{43}$/);
+  await run(`(async () => {
+    writeIdentity = async (value) => { globalThis.savedIdentity = structuredCloneForTest(value); };
+    globalThis.structuredCloneForTest = (value) => JSON.parse(JSON.stringify(value));
+    await prepareInviteResume('example-invite');
+  })()`);
+  assert.equal(run('savedIdentity.inviteCredentials["example-invite"]'), credential);
+  assert.equal(await run('prepareInviteResume("example-invite")'), credential);
+  assert.notEqual(await run('prepareInviteResume("another-invite")'), credential);
+  assert.equal(run('Object.hasOwn(savedIdentity, "password")'), false);
 });
 
 test('naive server UTC and explicit UTC have identical ordering', async () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -9,10 +10,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from ..config import get_settings
 from ..db import get_session
 from ..deps import get_current_admin, get_optional_admin
+from ..invite_security import hash_room_password, require_secure_transport, validate_password
 from ..models import (
     Admin,
     Chat,
@@ -176,6 +179,7 @@ async def links_list(
             "is_expired": _link_expired(link),
             "is_revoked": link.revoked_at is not None,
             "is_full": bool(link.max_uses and link.uses_count >= link.max_uses),
+            "password_required": link.password_hash is not None,
             "is_active": link.is_active and (
                 link.expires_at is None
                 or (
@@ -198,6 +202,7 @@ async def links_list(
         {"admin": admin, "links": rows, "public_url": _settings.public_url,
          "form_values": getattr(request.state, "form_values", {}),
          "link_error": getattr(request.state, "link_error", None),
+         "created_invite": getattr(request.state, "created_invite", None),
          "field_errors": getattr(request.state, "field_errors", {})},
         status_code=422 if getattr(request.state, "field_errors", {}) else 200,
     )
@@ -210,12 +215,46 @@ async def create_link(
     note: str | None = Form(default=None),
     expires_in_hours: str | None = Form(default=None),
     group_title: str | None = Form(default=None),
+    password_mode: str = Form(default="none"),
+    room_password: str = Form(default=""),
+    participant_limit: str = Form(default=""),
     admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     if link_type not in ("personal", "group"):
         raise HTTPException(status_code=400, detail="invalid link type")
     lt = LinkType(link_type)
+
+    request.state.form_values = {
+        "link_type": link_type, "note": note or "", "group_title": group_title or "",
+        "expires_in_hours": expires_in_hours or "", "password_mode": password_mode,
+        "participant_limit": participant_limit,
+    }
+    errors = {}
+    password = None
+    if password_mode == "generated":
+        password = secrets.token_urlsafe(12)
+    elif password_mode == "custom":
+        password = room_password
+        try:
+            validate_password(password)
+        except ValueError as exc:
+            errors["room_password"] = str(exc)
+    elif password_mode != "none":
+        errors["room_password"] = "Choose no password, generated password, or custom phrase."
+    limit = 2 if lt is LinkType.personal else 0
+    if lt is LinkType.group and participant_limit.strip():
+        try:
+            limit = int(participant_limit)
+            if not 2 <= limit <= 1000:
+                raise ValueError
+        except ValueError:
+            errors["participant_limit"] = "Enter a whole number from 2 to 1000, or leave blank."
+    if errors:
+        request.state.field_errors = errors
+        return await links_list(request, admin, session)
+    if password is not None:
+        require_secure_transport(request)
 
     expires_at = None
     expiry = (expires_in_hours or "").strip()
@@ -225,10 +264,6 @@ async def create_link(
             if not 1 <= hours <= 8760:
                 raise ValueError
         except ValueError:
-            request.state.form_values = {
-                "link_type": link_type, "note": note or "",
-                "group_title": group_title or "", "expires_in_hours": expiry,
-            }
             request.state.field_errors = {
                 "expires_in_hours": "Enter a whole number from 1 to 8760.",
             }
@@ -238,7 +273,9 @@ async def create_link(
     link = Link(
         token=generate_link_token(),
         link_type=lt,
-        max_uses=2 if lt is LinkType.personal else 0,
+        max_uses=limit,
+        password_hash=await run_in_threadpool(hash_room_password, password)
+        if password is not None else None,
         uses_count=0,
         is_active=True,
         note=(note or None),
@@ -253,6 +290,10 @@ async def create_link(
 
     session.add(link)
     await session.commit()
+    if password is not None:
+        request.state.created_invite = {"url": _link_url(link), "password": password}
+        request.state.form_values = {}
+        return await links_list(request, admin, session)
     return RedirectResponse(url="/admin/links", status_code=303)
 
 
@@ -331,6 +372,9 @@ async def _delete_links(
         link.revoked_at = datetime.now(timezone.utc)
         link.token = generate_link_token()
         link.note = None
+        link.password_hash = None
+        link.failed_attempts = 0
+        link.failed_window_started_at = None
         link.chat_id = None
     if commit:
         await session.commit()

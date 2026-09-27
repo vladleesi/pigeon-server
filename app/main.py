@@ -7,7 +7,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .admin_setup import ensure_default_admin
@@ -56,6 +58,22 @@ def create_app() -> FastAPI:
         description="Link-only messenger backend API.",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def private_responses(request: Request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def private_validation_errors(request: Request, exc: RequestValidationError):
+        # Pydantic's default errors echo request inputs, including credentials.
+        return JSONResponse(status_code=422, content={"detail": [
+            {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
+            for error in exc.errors()
+        ]})
 
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
