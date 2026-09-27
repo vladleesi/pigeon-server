@@ -167,6 +167,37 @@ needed. Regression coverage includes reset during password verification, reset
 after issuance, concurrent logins competing for the final slot, and expired
 session reclamation, all against an isolated test database.
 
+## Follow-up: client issuance and isolated recovery (0.3.2)
+
+Admission and legacy authentication commit before renewable session creation.
+Previously, creation trusted the earlier participant object and did not reread
+the invite. It could issue a session after revocation, deactivation or expiry,
+or migrate a legacy token after its cutoff. HTTP/WS checks still blocked invalid
+participants and invites, but a legacy cutoff could be bypassed through that gap.
+Issuance now refreshes both records under the SQLite write reservation, preserves
+the expected public identity against row reuse, and revalidates legacy tokens
+and sunset controls. Existing-credential retries use the same checks. Admission
+may already have committed membership; this is not an atomic admission rollback.
+
+New session expiry is capped by the issuing invite. Activation/migration/refresh
+responses also cap deadline metadata for earlier sessions, and `/me` reports
+access ending at the earliest JWT, session or invite deadline. Extending an invite
+does not extend the stored session lifetime. Consumed invites still allow valid
+reconnects and refresh. Revocation cannot retract an already authorized response;
+HTTP/WS credential checks enforce the committed state on subsequent authorization.
+
+Regression coverage exercises changes between authentication/admission and issuance,
+identical and conflicting concurrent refreshes, refresh versus device revocation,
+and rejection of normal/grace refresh after user or invite invalidation.
+Isolated restore tests demonstrate that a stale snapshot can revive revoked admin
+and client credentials. Rotating only the signing key leaves refresh credentials
+usable; removing only session tables leaves legacy JWTs usable. The combined
+procedure rejects the old credentials over HTTP and WS, permits authorized invite
+recovery, and preserves queued delivery IDs, membership and existing send evidence.
+Reapply post-snapshot invite revocations, user deactivations and password resets
+separately; session cleanup cannot reconstruct those changes. This does not verify
+production backup infrastructure, historical server/client rollback, or an external audit.
+
 ## Local history, metadata, and deployment
 
 Local history stays encrypted under a separate AES key, with storage location
@@ -262,6 +293,15 @@ JavaScript port solely because it runs in the current browser client.
    reuse message keys. Old messages gain no retroactive forward secrecy.
 
 ## Verification and limits
+
+The 0.3.2 client session/recovery follow-up passed **132 Python tests and 38
+JavaScript tests**, including 38 new parametrized boundary/concurrency and restore
+cases. Ruff, compilation, client/form syntax, documentation links, landing assets
+and structured data, whitespace and privacy exclusions passed. The existing
+Starlette/AnyIO deprecation warning remains. Restore tests used dedicated temporary
+databases; no running service or production database was changed. Operator backup
+drills, historical server/client rollback, deployment, independent review and
+real-browser QA remain open. Unchanged SEO/social assets retain their prior review.
 
 The 0.3.1 admin login follow-up passed **94 Python tests and 38 JavaScript tests**,
 including the four new isolated-database regressions. Ruff, compilation, client/form

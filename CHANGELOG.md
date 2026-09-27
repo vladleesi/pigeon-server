@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-09-27
+
+- Recheck participant and invite validity when issuing renewable sessions, including activation retries and legacy migration across token expiry or sunset.
+- Cap renewable session deadlines by invite expiry and report the earlier session deadline in profile access metadata.
+- Verify refresh/revocation races and isolated backup recovery, including both signing-key rotation and removal of restored session records.
+
 ## 0.3.1 — 2026-09-27
 
 - Reject admin logins verified against a password changed by a concurrent reset, preserving session revocation.

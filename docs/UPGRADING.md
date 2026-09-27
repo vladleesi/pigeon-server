@@ -75,6 +75,20 @@ deliveries. Clients must still deduplicate local history and acknowledge restore
 rows after confirming persistence. Delivery IDs expire or are deleted with their message/receipt rows. The bounded
 send ledger introduced below survives those deletions until its retry deadline.
 
+## 0.3.2 client session and recovery hardening
+
+Update the server using the normal controlled deployment procedure. There is no
+schema or client migration. New renewable sessions are capped by invite expiry;
+existing sessions retain their stored lifetime but remain subject to the current
+invite and user checks. A concurrent revocation, deactivation, invite expiry or
+legacy migration cutoff now rejects session issuance with 401. Admission may
+already have committed a slot; retain the saved invite resume credential.
+Rollback restores the issuance race and inaccurate deadline responses.
+
+Isolated automated restore tests exercise the recovery procedure below, including
+the failure of either step on its own. They do not validate an operator's actual
+backup infrastructure or a historical server/client rollback.
+
 ## 0.3.1 admin login hardening
 
 Update the server using your normal controlled deployment procedure. No database
@@ -117,11 +131,21 @@ file/volume access to the service/operator, and enforce a separate backup deleti
 schedule. Logical SQL deletion does not erase old snapshots, WAL or free pages.
 Treat restoring an old database as rolling authentication state back: before
 reopening it, rotate the signing secret and remove `refresh_uses`, `client_sessions`
-and `admin_sessions` while offline. Clients must recover through their saved
-invite credentials. Later send deduplication evidence absent from the backup is
+and `admin_sessions` in one database transaction while all writers remain stopped.
+Deploy the new secret consistently to every worker before reopening access.
+Rotating only the secret leaves restored refresh credentials usable; clearing only
+session tables leaves legacy JWTs usable. Restoring without either step can revive
+both client and admin sessions that were revoked after the snapshot.
+Reapply subsequent invite revocations, user deactivations and admin password resets:
+the snapshot also rolls those records back, and session cleanup does not invalidate
+saved invite resume credentials or change restored passwords. Clients with still
+authorized invites recover through their saved invite credentials.
+Later send deduplication evidence absent from the backup is
 unrecoverable; do not blindly replay outboxes across a restoration. Rollback to
 older server code requires the matching pre-upgrade backup/client and loses the
-new protections and intervening state. Test this operational procedure separately.
+new protections and intervening state. Exercise this procedure with your own isolated
+backup copy before production recovery; the automated fixture does not validate
+your storage, secrets distribution, proxy, or historical client/server versions.
 
 HTTPS/WSS is required outside loopback. The application does not trust arbitrary
 forwarded headers; the shared runner uses `SIDEWORD_TRUSTED_PROXY_IPS` (explicit

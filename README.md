@@ -120,6 +120,10 @@ python -m scripts.create_admin --username admin
 For Docker, prefix it with `docker compose exec sideword`.
 Password resets revoke existing admin sessions and reject in-flight logins that
 verified the previous password. Sign in again after a reset.
+Client session issuance rechecks invite and participant validity; renewable
+deadlines are bounded by invite expiry. Follow the
+[recovery procedure](docs/UPGRADING.md#030-deliverysession-hardening-rollout)
+when restoring backups so old credentials do not regain access.
 
 ## Public access
 

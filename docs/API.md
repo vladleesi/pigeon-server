@@ -285,6 +285,11 @@ credentials can retry a lost activation response before their first rotation.
 The browser opts in. A valid legacy JWT can instead POST `/api/v1/sessions` with
 `{"credential":"<persisted-random-secret>"}` to migrate; registered sessions
 cannot use that endpoint to extend their absolute lifetime.
+Issuance rechecks the current participant identity, active state, and invite under
+the database write reservation, including retries of an existing credential.
+Migration also rechecks the legacy JWT expiry and configured sunset at that point.
+A validity change after admission/authentication returns 401 without issuing a
+new session; admission may already have committed the participant slot.
 
 POST `/api/v1/sessions/refresh` without an access token, over HTTPS, with
 `{"credential":"<current-secret>","next_credential":"<fresh-persisted-secret>"}`.
@@ -295,11 +300,15 @@ its successor is current. Any other reuse of a known consumed credential revokes
 the session. Never replace a pending proposal merely because a response was lost.
 Access defaults to 15 minutes; the absolute session lifetime defaults to 30 days
 and never extends on refresh. Refresh after that deadline requires invite recovery.
+New session lifetimes are capped by the invite expiry at issuance. Activation,
+migration and refresh responses cap both deadline fields by the current invite
+expiry, including sessions created by earlier releases. Extending an invite does
+not extend a session's stored lifetime.
 
 GET `/api/v1/sessions` lists the authenticated user's sessions; DELETE
 `/api/v1/sessions/{session_id}` revokes one. Revocation affects HTTP and WS session
-checks. `/me` reports `access_expires_at` and `session_expires_at`, each capped by
-invite expiry. Consumed/sealed invites still permit valid session refresh;
+checks. `/me` reports `access_expires_at` and `session_expires_at`; access ends at
+the earliest JWT, session or invite deadline. Consumed/sealed invites still permit valid session refresh;
 revoked, deleted, expired invites and inactive users do not.
 
 An optional UTC `LEGACY_TOKEN_DEADLINE` rejects old JWTs and activation without a
