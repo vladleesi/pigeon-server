@@ -138,10 +138,12 @@ Back up the database before upgrading and follow the
 Make changes on a feature or fix branch, never directly on `main`. GitHub Actions
 runs lint, Python/JavaScript tests, and a Docker build on pushes to every branch
 except `main`, and on pull requests targeting `main`. Pushes to `main` do not run CI.
-For promotion without a pull request, wait for all checks on the exact source commit
-to pass, then fast-forward `main` to that commit and push. If branches have diverged,
-integrate the changes on the source branch and rerun checks before promotion.
-No workflow automatically merges or deploys changes.
+After both check jobs pass on a push to the maintainer's `develop` branch, GitHub
+Actions fast-forwards and pushes that exact tested commit to `main`. Other branches
+and pull requests run checks only. Promotion skips outdated runs and rejects
+diverged history; integrate changes on the source branch and rerun checks to retry.
+The promotion job uses the built-in GitHub token with `contents: write`; repository
+rules must permit its push to `main`. This workflow does not deploy the application.
 
 The single backend version source is `app/version.py`, exposed in `/health` and
 OpenAPI. Use semantic versions: patch for fixes, minor for features/pre-1.0 breaking

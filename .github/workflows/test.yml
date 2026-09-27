@@ -41,3 +41,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag sideword-server:test .
+
+  promote:
+    name: Promote develop to main
+    needs: [smoke, container]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: promote-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward main to the tested commit
+        env:
+          TESTED_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin main develop
+          if [ "$(git rev-parse origin/develop)" != "$TESTED_SHA" ]; then
+            echo "develop has advanced; leaving promotion to its newer run."
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor origin/main "$TESTED_SHA"; then
+            echo "main has diverged; merge it into develop and rerun checks."
+            exit 1
+          fi
+          git push origin "$TESTED_SHA:refs/heads/main"
