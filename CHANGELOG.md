@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-09-27
+
+- Remove the empty Unreleased section and standardize changelog bullet formatting.
 
 ## 0.3.0 — 2026-09-27
 
@@ -11,7 +13,6 @@
 - Add admin CSRF protection, persistent login throttling, and revocable sessions.
 - Add opt-in renewable client sessions with hashed refresh rotation, replay detection, per-device revocation, and explicit legacy sunset controls.
 - Bound request bodies/rates, WebSocket connections/frames, queued ciphertext, receipts, retry metadata, and participant creation; enforce TLS and local-only administration by default.
-
 - Add exact delivery ACK/read endpoints and random delivery IDs; switch browser retries to the safer contract while preserving legacy APIs.
 - Atomically consume read messages and create receipts, preventing duplicate receipts from concurrent readers.
 - Preserve the browser v1 wire format while separating protocol operations from UI and storage.
@@ -30,5 +31,4 @@
 
 ## 0.1.0
 
-- Initial backend: invite-based chats, encrypted-message relay, browser test
-  client, administration, and configuration export/import.
+- Initial backend: invite-based chats, encrypted-message relay, browser test client, administration, and configuration export/import.
