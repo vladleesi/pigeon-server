@@ -36,13 +36,18 @@ node --check app/static/client-protocol.js
 node --check app/static/link-form.js
 node --check app/static/admin-links.js
 node --check app/static/invite-vault.js
-node --test tests/client_delivery.test.cjs tests/client_crypto.test.cjs tests/client_identity.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
+node --test tests/client_retry.test.cjs tests/client_delivery.test.cjs tests/client_crypto.test.cjs tests/client_identity.test.cjs tests/admin_links.test.cjs tests/invite_vault.test.cjs
 docker build -t sideword-chat-server:test .
 ```
 
 Add tests for behavioral changes and update affected documentation. Keep the
 `docs/` landing page current when capabilities, API contracts, security, or
 deployment instructions change.
+Keep documentation focused: README for setup/use, API for request contracts,
+PROTOCOL for wire/client requirements, UPGRADING for operator procedures, and
+SECURITY_REVIEW for current protections, remaining work and latest verification.
+Link to the owning document instead of repeating it; keep release history in
+CHANGELOG and replace obsolete status notes rather than appending work diaries.
 
 ## Pull requests and releases
 

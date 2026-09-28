@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 — 2026-09-27
+
+- Open the join form for a different invite URL instead of resuming the previous chat; select the invited room after activation.
+- Pause background chat activity while a new invite awaits activation and preserve device keys, encrypted history, and pending sends across invite changes.
+
 ## 0.3.2 — 2026-09-27
 
 - Recheck participant and invite validity when issuing renewable sessions, including activation retries and legacy migration across token expiry or sunset.

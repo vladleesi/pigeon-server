@@ -74,8 +74,8 @@ a peer resets their device. Pinning cannot detect substitution before first use,
 a malicious initial roster, or malicious JavaScript served by the origin.
 
 Existing IndexedDB database `sideword-test-client`, version 1, and store `device`
-are retained. `peer:` records are additive. Identity records and `history:`
-records are unchanged. Local history uses a separate non-exportable AES-256-GCM
+are retained. Peer pins and session/invite fields are additive; the encrypted
+`history:` format is retained. Local history uses a separate non-exportable AES-256-GCM
 key, a fresh 12-byte IV per record, and the complete history storage key as AAD.
 Private identity and storage keys are browser CryptoKeys, never uploaded. New
 private keys are generated non-exportable; existing keys are reused unchanged.
@@ -100,11 +100,11 @@ consumes a row and creates its receipt atomically, including concurrent requests
 The legacy `/ack` takes row IDs and `/read` takes client message IDs. Delayed
 ACKs can race row-ID reuse, and colliding client message IDs from different group
 senders are ambiguous to legacy `/read`. They remain supported for existing
-clients; new clients must not fall back to them. Server sends now deduplicate the chat/sender/client-message identity within a
-bounded retry window and reject conflicting envelope sets. Persist outgoing
-ciphertext before upload and retry the same envelopes. Delivery IDs do not authenticate relay metadata or prevent replay
-by a malicious relay. The bundled browser uses an encrypted persistent outbox and Web Locks for
-concurrent tabs. Browser-independent interoperability still requires release QA.
+clients; new clients must not fall back to them. Persist outgoing ciphertext before
+upload and retry the same envelopes within the [server retry window](API.md#send-retries-and-capacity).
+Delivery IDs do not authenticate relay metadata or prevent malicious relay replay.
+The browser uses an encrypted outbox and Web Locks across tabs; browser-independent
+interoperability still requires release QA.
 
 `tests/client_crypto.test.cjs` checks both directions of v1 interoperability
 against Node's independent OpenSSL APIs using synthetic fixed keys, salt, and

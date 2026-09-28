@@ -11,26 +11,11 @@ room limits, password handling, expiration, and browser use.
 
 ## Bundled test web client
 
-The dependency-free client at `/client` can activate invite links and exchange
-encrypted messages with another copy of itself. It uses browser Web Crypto with
-a sender-static plus ephemeral X25519 construction, HKDF-SHA-256, and
-AES-256-GCM. Fingerprints are calculated locally for out-of-band verification;
-the first observed peer key is pinned locally and later changes block use. This
-is trust on first use, not protection against initial substitution or malicious
-server-delivered JavaScript. The protocol has no recipient forward secrecy or
-post-compromise recovery. See the [v1 wire contract](PROTOCOL.md) and
-[security review / migration plan](SECURITY_REVIEW.md). Its private key is stored
-as a non-exportable `CryptoKey` in IndexedDB. Local history is encrypted with a
-separate non-exportable AES-GCM key and survives page refreshes until **Reset
-device** is used. The page ships with a restrictive Content Security Policy and
-does not load third-party code.
-
-Use it on `localhost` or behind HTTPS. It is intended for testing, has not been
-independently audited, and its envelope format is not compatible with NaCl
-`crypto_box` clients without an interoperability layer.
-
-For a two-browser walkthrough, see [invites and chats](../README.md#invites-and-chats).
-Invite links use `/l/{token}` and open a landing page that links to `/client`.
+`/client` exchanges encrypted messages using the unaudited [v1 wire format](PROTOCOL.md)
+on localhost or HTTPS. It is not compatible with NaCl `crypto_box` without an
+interoperability layer. See [invites and chats](../README.md#invites-and-chats) for
+use/reset behavior and [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for trust boundaries.
+`/l/{token}` is the invite landing page and links to `/client?invite={token}`.
 
 ## Activate link
 
@@ -41,12 +26,15 @@ Content-Type: application/json
 {
   "public_key": "<base64, 32 bytes, X25519>",
   "display_name": "Alice",
-  "resume_credential": "<43-character base64url credential>"
+  "resume_credential": "<43-character base64url credential>",
+  "session_credential": "<separate 43-character base64url credential>"
 }
 ```
 
 `display_name` is optional; include `password` for protected rooms. The response
-contains a client JWT, user identity, and chat participants:
+contains a client JWT, user identity, and chat participants. `session_credential`
+opts into [renewable sessions](#renewable-client-sessions), adding the session ID
+and deadline fields described there; omitting it uses legacy activation until sunset.
 
 ```text
 {
@@ -63,7 +51,8 @@ contains a client JWT, user identity, and chat participants:
 - Personal links allow **two participants**; once full, they seal against new joins.
   Authenticated reconnects reuse the existing slot.
 - Group links share a chat and optionally seal at their participant limit.
-- If the device already sends `Authorization: Bearer ...`, activation **does not** create a new user — it adds the current user to the new chat/group.
+  Admission is also capped at 101 members to fit the 100-recipient send limit.
+- A valid existing bearer session reuses its current user when joining another chat.
 
 ### Admission and retries
 
@@ -86,12 +75,7 @@ Password verification uses OpenSSL-backed scrypt with N=2^17, r=8, p=1, a random
 16-byte salt, and a 32-byte result. Generated passwords contain 96 random bits.
 This is server verification over HTTPS, not PAKE: the server and TLS terminator
 must be trusted. Passwords are never included in URLs or stored or exported in
-plaintext. Admin exports preserve verifiers and retry metadata; startup adds
-these fields without changing unprotected invites.
-
-The admin UI's invite recovery uses AES-GCM with a non-exportable IndexedDB key
-and a random record ID in sessionStorage. It preserves the latest protected
-invite in the same tab for up to 24 hours and purges expired records on access.
+plaintext. Admin exports preserve verifiers and admission retry metadata.
 
 ## Profile and chats
 
@@ -130,14 +114,14 @@ Rules:
 1. **WebSocket** (recommended):
 
    ```
-   GET /ws?token=<JWT>
+   GET /ws
+   Sec-WebSocket-Protocol: sideword.v1
    ```
 
-   The `hello` frame includes backlog (offline messages and receipts); then `message` and `read` events stream live.
-   Browser clients can avoid putting the JWT in the URL by requesting the
-   `sideword.v1` WebSocket subprotocol and immediately sending
-   `{"type":"auth","token":"<JWT>"}` as the first frame. Query and legacy
-   authentication-subprotocol clients remain supported.
+   Immediately send `{"type":"auth","token":"<JWT>"}` as the first frame.
+   The `hello` frame includes backlog; `message` and `read` events follow live.
+   Legacy `/ws?token=<JWT>` and `sideword.auth.<JWT>` subprotocol authentication
+   remain supported, but can expose credentials to URL/header logs.
 
 2. **Polling fallback**:
 
@@ -229,35 +213,24 @@ Deletes pending ciphertext your user sent that recipients have not read yet.
 
 ## Message security model
 
-| Layer | Protects against | Mechanism |
-| --- | --- | --- |
-| Transport | Passive sniffing, basic MITM on connections | HTTPS/WSS (reverse proxy) |
-| Payload | Server, admins, DB leaks | E2E on clients; server stores/forwards only `ciphertext` |
-| Identity | Later changes to a known peer key | Test client computes SHA-256 fingerprints locally and pins first use; verify full fingerprints out-of-band |
-| Retention | Permanent archive | Server deletes after ACK; TTL purge for stale pending (default 30 days) |
-| Session | Continued access after expiry/revocation | Expiring JWT bound to a valid invite; HTTP checks and WS checks before pushes and while idle |
-
 The server contract requires a 32-byte base64 X25519 public key and treats each
 ciphertext envelope as opaque base64 data. Production clients must agree on an
-authenticated envelope format. The bundled test client uses
-`X25519-2DH + HKDF-SHA-256 + AES-256-GCM`; NaCl/libsodium clients may instead use
-`crypto_box` when all participants use that format.
-
-The server's `key_fingerprint` is a convenience field, not an independent trust
-anchor. Neither protocol v1 nor `crypto_box` provides a session ratchet. A server
-that substitutes keys before first use or serves malicious client code remains
-outside the protection of local pinning. Default JWT lifetimes are unchanged;
-the [review](SECURITY_REVIEW.md) describes renewal and migration requirements.
+authenticated envelope format, such as the bundled [v1 contract](PROTOCOL.md).
+The server's `key_fingerprint` is a convenience, not a trust anchor: calculate and
+verify fingerprints locally. V1 has no recipient forward secrecy or recovery
+after key compromise. See [threat model and limits](SECURITY_REVIEW.md#threat-model-and-limits)
+for relay, browser, bearer-token and retention boundaries.
 
 ## Send retries and capacity
 
-`POST /chats/{chat_id}/messages` is idempotent by chat, authenticated sender, and
+`POST /api/v1/chats/{chat_id}/messages` is idempotent by chat, authenticated sender, and
 `client_message_id` for `SEND_IDEMPOTENCY_DAYS` (default 30). Identical decoded
 ciphertext and recipient sets return the original 200 response; conflicting
 payloads return 409. An identical retry after read/ACK or partial fanout delivery
 does not recreate deleted rows. Recipient order and equivalent base64 encoding
 do not change the comparison. IDs must be unique for each logical message.
-The guarantee begins with the first successful upload after this upgrade.
+The guarantee requires a ledger record from the first successful upload;
+pre-upgrade sends without that evidence have no retroactive retry guarantee.
 
 `/me.send_retry_window_seconds` advertises the current window. Persist envelopes
 before uploading; never re-encrypt a retry under the same ID. A shorter later

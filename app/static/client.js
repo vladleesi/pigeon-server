@@ -36,6 +36,7 @@ const elements = {
 let identity = null;
 let chats = [];
 let selectedChatId = null;
+let invitePending = false;
 let synchronizing = false;
 let socket = null;
 let reconnectTimer = null;
@@ -88,7 +89,8 @@ async function writeIdentity(value, updateSession = false) {
       // committed by another tab while a network request was in flight.
       if (!updateSession && current.result && current.result.publicId === value.publicId) {
         for (const field of ["token", "suspendedToken", "refreshCredential", "sessionId",
-          "tokenExpiresAt", "sessionExpiresAt", "pendingRefreshCredential"]) {
+          "tokenExpiresAt", "sessionExpiresAt", "pendingRefreshCredential",
+          "activeInviteToken", "activeInviteChatId"]) {
           if (Object.hasOwn(current.result, field)) value[field] = current.result[field];
           else delete value[field];
         }
@@ -223,28 +225,6 @@ async function readHistoryRecords(recordPrefix = null) {
     transaction.oncomplete = () => {
       database.close();
       resolve(records);
-    };
-  });
-}
-
-async function clearStoredHistory() {
-  const database = await openDatabase();
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.openCursor();
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) return;
-      if (typeof cursor.key === "string" && (cursor.key.startsWith(HISTORY_PREFIX) || cursor.key.startsWith("outbox:"))) {
-        cursor.delete();
-      }
-      cursor.continue();
-    };
-    request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => {
-      database.close();
-      resolve();
     };
   });
 }
@@ -572,15 +552,15 @@ function selectChat(chatId) {
 }
 
 function updateIdentityUi() {
-  const active = Boolean(identity?.token && identity?.publicId);
+  const active = Boolean(!invitePending && identity?.token && identity?.publicId);
   elements.setupPanel.hidden = active;
   elements.clientPanel.hidden = !active;
-  document.querySelector("#reconnect-session").hidden = active || !identity?.suspendedToken;
+  document.querySelector("#reconnect-session").hidden = invitePending || active || !identity?.suspendedToken;
   updateConnectionState(false);
 }
 
 function updateConnectionState(connected) {
-  const active = Boolean(identity?.token && identity?.publicId);
+  const active = Boolean(!invitePending && identity?.token && identity?.publicId);
   elements.connectionState.classList.toggle("online", active && connected);
   elements.identityLabel.textContent = active
     ? `Device ${identity.publicId} · ${connected ? "Live" : "Polling"}`
@@ -588,7 +568,7 @@ function updateConnectionState(connected) {
 }
 
 async function loadChats() {
-  if (!identity?.token) return;
+  if (invitePending || !identity?.token) return;
   const data = await api("/api/v1/me");
   const deadline = data.session_expires_at || data.access_expires_at;
   accessDeadline = deadline
@@ -730,7 +710,7 @@ async function processIncoming(data) {
 }
 
 async function synchronize() {
-  if (!identity?.token || synchronizing) return;
+  if (invitePending || !identity?.token || synchronizing) return;
   synchronizing = true;
   try {
     await loadChats();
@@ -746,7 +726,7 @@ async function synchronize() {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer || !identity?.token) return;
+  if (invitePending || reconnectTimer || !identity?.token) return;
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     connectSocket();
@@ -775,7 +755,7 @@ async function handleSocketPayload(payload) {
 }
 
 function connectSocket() {
-  if (!identity?.token || (socket && socket.readyState <= WebSocket.OPEN)) return;
+  if (invitePending || !identity?.token || (socket && socket.readyState <= WebSocket.OPEN)) return;
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${scheme}//${window.location.host}/ws`, ["sideword.v1"]);
   socket = ws;
@@ -896,10 +876,14 @@ elements.activationForm.addEventListener("submit", async (event) => {
       }),
     });
     if (previousPublicId && previousPublicId !== result.user.public_id) {
-      await clearStoredHistory();
+      // Persisted history/outbox are scoped by public ID. Keep them for a later
+      // reconnect; a new invite must never perform a destructive device reset.
       messagesByChat.clear();
       seenMessageIds.clear();
       seenReceiptIds.clear();
+      pendingReadsByChat.clear();
+      pendingReceiptIds.clear();
+      failedMessageReasons.clear();
     }
     identity.token = result.token;
     identity.refreshCredential = sessionCredential;
@@ -910,7 +894,12 @@ elements.activationForm.addEventListener("submit", async (event) => {
     delete identity.pendingRefreshCredential;
     identity.suspendedToken = null;
     identity.publicId = result.user.public_id;
+    identity.activeInviteToken = token;
+    identity.activeInviteChatId = result.chat.id;
     await writeIdentity(identity, true);
+    selectedChatId = result.chat.id;
+    invitePending = false;
+    await loadStoredHistory();
     history.replaceState(null, "", "/client");
     updateIdentityUi();
     await refresh();
@@ -994,7 +983,7 @@ async function removeOutbox(key) {
 }
 
 async function flushOutbox() {
-  if (!identity?.token) return;
+  if (invitePending || !identity?.token) return;
   await deviceLock(`outbox:${identity.publicId}`, async () => {
     const records = await readHistoryRecords(`outbox:${identity.publicId}:`);
     for (const stored of records) {
@@ -1057,7 +1046,7 @@ elements.messageForm.addEventListener("submit", async (event) => {
 
 elements.refreshButton.addEventListener("click", refresh);
 document.querySelector("#reconnect-session").addEventListener("click", async (event) => {
-  if (!identity?.suspendedToken) return;
+  if (invitePending || !identity?.suspendedToken) return;
   event.target.disabled = true;
   identity.token = identity.suspendedToken;
   try {
@@ -1090,10 +1079,13 @@ async function start() {
     throw new Error("This client requires a secure browser context (HTTPS or localhost) with Web Crypto.");
   }
   identity = await readIdentity();
+  const requestedInvite = (elements.inviteToken.value || "").trim();
+  invitePending = Boolean(requestedInvite && requestedInvite !== identity?.activeInviteToken);
+  if (!invitePending) selectedChatId = identity?.activeInviteChatId || null;
   await ensureStorageKey();
-  await loadStoredHistory();
+  if (!invitePending) await loadStoredHistory();
   updateIdentityUi();
-  if (identity?.token) {
+  if (!invitePending && identity?.token) {
     await refresh();
     connectSocket();
   }
@@ -1114,7 +1106,7 @@ function formatTimeRemaining(milliseconds) {
 function updateSessionCountdown() {
   const element = document.querySelector("#session-countdown");
   if (!element) return;
-  element.hidden = !identity?.token || accessDeadline === null;
+  element.hidden = invitePending || !identity?.token || accessDeadline === null;
   if (element.hidden) return;
   const remaining = accessDeadline - performance.now();
   element.textContent = `Session expires in ${formatTimeRemaining(remaining)}`;

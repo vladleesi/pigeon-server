@@ -1,166 +1,130 @@
-# Backups and upgrades
+# Backups, upgrades and recovery
+
+Use this guide for operator procedures; see [README.md](../README.md) for initial
+setup, [CHANGELOG.md](../CHANGELOG.md) for releases, and
+[SECURITY_REVIEW.md](SECURITY_REVIEW.md) for security boundaries and outstanding work.
 
 ## Backups
 
-For a database backup, stop the server and copy its SQLite database and any
-adjacent `-wal` and `-shm` files before restarting. The default database path is
-`data/sideword.sqlite3` locally or
-`/data/sideword.sqlite3` in Docker's `sideword-data` volume. Preserve `.env`
-securely with the backup, including the signing secret.
+Stop all backend writers, then copy the SQLite database and adjacent `-wal` and
+`-shm` files before restarting. Defaults are `data/sideword.sqlite3` locally and
+`/data/sideword.sqlite3` in Docker's `sideword-data` volume. Preserve configuration
+and the signing secret securely with the backup. Encrypt backups with
+operator-controlled keys, restrict access, and set separate backup/export retention.
+SQL deletion and message TTL do not erase old backups, WAL or free pages.
 
-For configuration transfer, use **Admin > Export** at `/admin/export-ui`.
-Export/import bundles contain users, chats, participants, invite tokens,
-password verifiers, and retry metadata, but no message history or admin accounts.
-Treat them as secrets. Full replacement removes existing configuration and
-pending deliveries. The CLI exporter omits protected-invite and resume
+Configuration transfer is not a full backup. **Admin > Export** at
+`/admin/export-ui` includes users, chats, participants, invites, password verifiers
+and admission retry metadata. It omits queued messages/receipts, admin accounts and
+the send/session ledger. Full replacement removes existing configuration and
+pending deliveries. The CLI exporter also omits protected-invite and resume
 metadata; use the admin export for configuration transfer.
 
-Browser keys and decrypted history are stored separately in the browser,
-scoped to its origin. A server backup does not recover them. Clearing site data
-or using **Reset device** removes them; create fresh invites if the old
-participant slots were already filled.
+Browser keys/history are separate and origin-bound. Server backups cannot recover
+them. Clearing site data or Reset device can permanently lose them without freeing
+participant slots; new invites may be needed.
 
 ## Upgrade
 
-1. Read the target release's [changelog](../CHANGELOG.md).
-2. Stop the server and back up the database and configuration as above.
-3. Update application files to the target release.
-4. Review `.env.example` for changed settings, preserving your existing secrets.
-5. For Python, activate the virtual environment, run
-   `python -m pip install -r requirements.txt`, then `python -m scripts.serve_shared`.
-   For Docker, run `docker compose up -d --build`.
-6. Check `/health` on the local admin listener for the expected version, then
-   reload browser clients.
+1. Read the target changelog and compatibility notes below.
+2. Stop all writers and take the database/configuration backup.
+3. Update the server and matching browser assets. Review `.env.example` for changed
+   settings without replacing existing secrets.
+4. In the Python virtual environment, install changed requirements with
+   `python -m pip install -r requirements.txt`, then run
+   `python -m scripts.serve_shared`. For Docker, use `docker compose up -d --build`.
+5. Check `/health` on the local admin listener for the expected version and verify
+   private routes are blocked publicly. Reload browser clients.
+6. Keep the backup until verification is complete.
 
-Startup applies additive SQLite schema migrations. Keep the backup until the
-upgrade is verified. Backend release numbers, API `/api/v1`, and browser
-encryption format versions are independent; see [contributing](../CONTRIBUTING.md#pull-requests-and-releases)
-for the release process.
+Startup applies additive SQLite migrations. Upgrade every writer together;
+mixing old and new server code against one database is unsupported.
+SQLite 3.35+ is required for atomic read deletion/receipt creation.
 
-## Client security hardening (v1-compatible)
+## Compatibility notes
 
-The protocol module must be deployed alongside `client.js` and `client.html`.
-Reload the client to load both scripts. No identity key, JWT, invite credential,
-ciphertext, or local-history migration is required. New
-`peer:` records hold local first-use fingerprint pins in the existing IndexedDB
-store. Older client code ignores them; rolling back loses pin enforcement.
-Verify existing peers out of band on the first upgraded use. Unexpected changed
-keys block use; do not reset the device or delete history to dismiss the warning.
+| Upgrade | Required action / boundary |
+| --- | --- |
+| Browser key pinning | Deploy `client-protocol.js`, `client.js` and `client.html` together. Existing keys/history remain usable; additive `peer:` records hold pins. Verify peers out of band. Do not clear history to dismiss a changed-key warning. |
+| Exact acknowledgements | Upgrade the server before clients. Startup backfills random delivery IDs, preserving ciphertext/timestamps. The bundled client requires exact endpoints and retains failed acknowledgements instead of falling back to legacy deletion. |
+| Registered sessions (0.3.0) | Startup adds retry/session/rotation/login-limit tables. Admins using old stateless tokens must log in again; cookie-based forms/APIs need CSRF tokens. Browser session/outbox coordination requires Web Locks and fails closed without them. |
+| Admin/client race fixes (0.3.1–0.3.2) | No schema, key or client migration. Valid sessions remain usable. New session lifetime is capped by invite expiry; rejected session issuance may follow an already committed admission, so preserve resume credentials. |
+| Invite navigation (0.3.3) | Reload the client. A different invite shows its join form and pauses that tab's background activity; activation selects its room. Same invite or `/client` resumes the saved room. Older identities show the form once for an explicit URL. Keys/history/outbox remain scoped to their participant identity for later reconnects. |
 
-WS sessions are now checked before delivery and periodically while idle. Expired
-or revoked credentials may therefore disconnect earlier than with the old client
-ping-dependent behavior. Supported authentication transports and default TTLs
-are unchanged. See [security review](SECURITY_REVIEW.md) for the separate ratchet
-and renewable-session migration plan.
+Backend release, HTTP API and encryption envelope versions are independent.
+No upgrade above introduces a ratchet or changes the v1 ciphertext format.
 
-## Exact delivery acknowledgements
+## Retire legacy clients
 
-Update the server before reloading browser clients. Startup adds `delivery_id`
-columns and unique indexes to pending messages and receipts, backfilling a random
-identity for each existing row. Existing ciphertext and timestamps remain intact;
-later startups preserve the identifiers. All server writers must be upgraded
-together; running old and new server code against the same database is unsupported.
-SQLite 3.35 or newer is required for atomic `DELETE ... RETURNING` operations.
+After deploying the server protections:
 
-Polling and WS payloads include the new field. Old clients can still use legacy
-HTTP endpoints. The upgraded browser requires exact endpoints and leaves failed
-acknowledgements retryable when connected to an older server. Do not downgrade
-only the server underneath upgraded clients. A server-code rollback requires a
-compatible pre-upgrade database backup and matching client code; it loses later
-state and the new delivery protections.
+1. Confirm every supported client uses renewable sessions and exact ACK/read.
+   Verify persisted refresh proposals, duplicate-send handling, offline recovery
+   and concurrent tabs in release QA.
+2. Set `SIDEWORD_ALLOW_LEGACY_ACK=false` and a fixed UTC
+   `SIDEWORD_LEGACY_TOKEN_DEADLINE`. Until then, legacy tokens bypass per-device
+   revocation and legacy deletion endpoints retain ambiguous matching.
+3. Keep saved invite resume credentials for authorized recovery. Session revocation
+   does not revoke them; revoke/delete the invite if they are compromised.
 
-Full database backups preserve delivery IDs; configuration exports omit queued
-messages and receipts. A restored backup can contain previously acknowledged
-deliveries. Clients must still deduplicate local history and acknowledge restored
-rows after confirming persistence. Delivery IDs expire or are deleted with their message/receipt rows. The bounded
-send ledger introduced below survives those deletions until its retry deadline.
+Do not shorten the send retry window for existing outboxes without resolving them:
+clients retain their original deadlines. Queued data, retry/session records and
+persistent user/invite metadata have separate lifecycles; see
+[retention boundaries](SECURITY_REVIEW.md#delivery-local-storage-and-retention).
 
-## 0.3.2 client session and recovery hardening
+## Restore safely
 
-Update the server using the normal controlled deployment procedure. There is no
-schema or client migration. New renewable sessions are capped by invite expiry;
-existing sessions retain their stored lifetime but remain subject to the current
-invite and user checks. A concurrent revocation, deactivation, invite expiry or
-legacy migration cutoff now rejects session issuance with 401. Admission may
-already have committed a slot; retain the saved invite resume credential.
-Rollback restores the issuance race and inaccurate deadline responses.
+A backup restores old authentication and policy state, potentially reviving
+credentials revoked after the snapshot. Before reopening access:
 
-Isolated automated restore tests exercise the recovery procedure below, including
-the failure of either step on its own. They do not validate an operator's actual
-backup infrastructure or a historical server/client rollback.
+1. Stop every writer. Restore to the intended database location with access blocked.
+2. Rotate `SIDEWORD_SECRET_KEY` and configure the new value on every worker.
+3. In one database transaction, delete restored `refresh_uses`, then
+   `client_sessions`, then `admin_sessions`.
+4. Reapply later invite revocations, user deactivations and admin password resets.
+   The snapshot rolled these back too; session cleanup cannot reconstruct them.
+5. Restart and verify old admin/client tokens and refresh credentials are rejected.
+   Admins log in again; clients recover through still-authorized saved invite
+   credentials.
 
-## 0.3.1 admin login hardening
+Both steps 2 and 3 are necessary: key rotation alone leaves refresh credentials
+usable, and session removal alone leaves legacy JWTs usable. Invite resume
+credentials and restored passwords remain valid unless separately changed.
 
-Update the server using your normal controlled deployment procedure. No database
-schema, client, or encryption protocol migration is required; valid admin sessions
-keep working. Password resets reject in-flight logins verified against the old
-password and continue to revoke sessions issued before the reset commits.
-An affected login returns the normal invalid-credentials error; sign in with the
-new password. Session issuance now enforces the global 1,000-session cap across
-workers and removes expired admin sessions without waiting for hourly cleanup.
-Rolling back server code restores the login/reset race and non-atomic cap.
+Full backups preserve delivery IDs and existing send evidence, but may contain
+already-acknowledged deliveries. Clients must deduplicate local history before
+acknowledging restored rows. Evidence of sends after the snapshot is lost; do not
+blindly replay later outboxes. Exercise this procedure with an isolated copy of
+your actual backup. Automated restore tests do not validate your storage, secret
+distribution, proxy or historical server/client versions.
 
-## 0.3.0 delivery/session hardening rollout
+## Rollback
 
-1. Stop all backend writers and make a private, consistent database backup.
-2. Deploy the new server and browser together. Startup adds retry, session,
-   rotation-evidence, and login-limit tables. Existing ciphertext/history stays
-   readable. No ratchet or v1 ciphertext migration is involved.
-3. Admins must log in again: pre-registry admin JWTs are rejected. Admin form/API
-   cookie clients must fetch and submit CSRF tokens. Password resets revoke
-   existing admin sessions. All administrative/schema routes are local-only by
-   default; use the local listener or an SSH-forwarded loopback endpoint.
-4. Migrate clients to renewable sessions and exact ACK/read. Verify saved refresh
-   proposals, offline recovery, duplicate sends and concurrent tabs in your
-   release QA. The browser requires Web Locks; it fails closed without them.
-5. After every client has migrated, set `SIDEWORD_ALLOW_LEGACY_ACK=false` and a
-   fixed UTC `SIDEWORD_LEGACY_TOKEN_DEADLINE`. Leaving compatibility enabled leaves
-   the legacy risks open. Do not silently shorten the retry window for queued
-   outboxes; clients have already persisted their original retry deadlines.
+Use matching server/client code and a compatible pre-upgrade backup; later data
+and protections may be lost. Apply the restore credential-invalidation procedure
+before reopening. Do not downgrade only the server beneath clients requiring
+exact acknowledgements. Older browser code loses peer-pin enforcement and can
+delete retained history on participant changes. Rolling back 0.3.1–0.3.2 fixes
+restores the documented authentication races. Historical rollback remains an
+operator test requirement, not a guarantee from current-code restore tests.
 
-Default retry metadata retention is 30 days even if ciphertext was read earlier.
-Admin sessions expire after 12 hours; client sessions after 30 days; refresh-use
-hashes remain until session expiry. Login-limit records expire after one minute.
-Hourly cleanup removes expired records; startup also schedules cleanup. Users,
-room metadata and invite resume credentials keep their existing lifecycle. There
-is no automatic destructive metadata purge. Full backups include these records;
-configuration exports omit the retry/session ledger and cannot replace backups.
+## Public deployment controls
 
-Keep database/configuration backups encrypted with host-controlled keys, restrict
-file/volume access to the service/operator, and enforce a separate backup deletion
-schedule. Logical SQL deletion does not erase old snapshots, WAL or free pages.
-Treat restoring an old database as rolling authentication state back: before
-reopening it, rotate the signing secret and remove `refresh_uses`, `client_sessions`
-and `admin_sessions` in one database transaction while all writers remain stopped.
-Deploy the new secret consistently to every worker before reopening access.
-Rotating only the secret leaves restored refresh credentials usable; clearing only
-session tables leaves legacy JWTs usable. Restoring without either step can revive
-both client and admin sessions that were revoked after the snapshot.
-Reapply subsequent invite revocations, user deactivations and admin password resets:
-the snapshot also rolls those records back, and session cleanup does not invalidate
-saved invite resume credentials or change restored passwords. Clients with still
-authorized invites recover through their saved invite credentials.
-Later send deduplication evidence absent from the backup is
-unrecoverable; do not blindly replay outboxes across a restoration. Rollback to
-older server code requires the matching pre-upgrade backup/client and loses the
-new protections and intervening state. Exercise this procedure with your own isolated
-backup copy before production recovery; the automated fixture does not validate
-your storage, secrets distribution, proxy, or historical client/server versions.
+Require HTTPS/WSS outside loopback. Keep `/admin`, its subpaths, `/docs`, `/redoc`
+and `/openapi.json` private for HTTP and WS upgrades. The shared runner exposes
+only the restricted listener on port 8001; Docker's port 8000 includes admin routes
+and needs proxy restrictions.
 
-HTTPS/WSS is required outside loopback. The application does not trust arbitrary
-forwarded headers; the shared runner uses `SIDEWORD_TRUSTED_PROXY_IPS` (explicit
-IP list), and standalone Uvicorn/Docker uses `FORWARDED_ALLOW_IPS` in its process
-environment. Never set either to `*`. Container-to-proxy addresses may differ
-from localhost; configure the actual trusted peer before exposing the service.
-Set HSTS at the TLS terminator after validation. Continue blocking admin/schema
-paths at the proxy and on the shared listener even with application checks.
+Trust only actual proxy IPs: `SIDEWORD_TRUSTED_PROXY_IPS` for the shared runner,
+`FORWARDED_ALLOW_IPS` for standalone Uvicorn/Docker. Never use `*`. Container peers
+may differ from localhost. Configure HSTS at the TLS terminator after validation.
 
-The defaults in `.env.example` bound request bytes, request rate, pending message
-count/bytes, receipts, retry records, users and WS connections. HTTP bodies have a
-15-second read deadline. Admission KDFs are serialized by SQLite; login attempts
-are persisted per hashed account/IP plus a global window. IP/connection/frame
-limits are per process and reset on restart. Add gateway/global rate, connection,
-header and idle-time limits, plus container memory/CPU/disk limits. Keep request,
-credential, query-string and body logging disabled/redacted at every proxy.
-The shared runner and Docker suppress raw access/WS INFO logs; SQL exceptions
-hide parameter values. Existing upstream logs are not automatically erased.
+Suppress/redact invite paths, query strings, request bodies, authorization,
+cookies and WS authentication at every proxy. Uvicorn requires both
+`--no-access-log` and `--log-level warning` because WS URLs use its error logger
+at INFO; shared runner/Docker already set these. Existing logs are not erased.
+
+HTTP/WS rate, connection and frame limits are per process. Database quotas and
+login limits are shared. Add gateway/global limits, header/idle timeouts, and host
+CPU/memory/disk limits. Defaults are in [the configuration example](../.env.example)
+and [API capacity rules](API.md#send-retries-and-capacity).

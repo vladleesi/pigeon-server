@@ -105,11 +105,8 @@ below uses the `SIDEWORD_` prefix, for example `SIDEWORD_MESSAGE_TTL_DAYS=30`.
 | `MAX_REQUEST_BYTES`, `REQUESTS_PER_MINUTE` | `2097152`, `600`; body and per-IP/process request limits |
 | `MAX_PENDING_MESSAGES`, `MAX_PENDING_BYTES` | `10000`, `268435456`; shared queued ciphertext limits |
 
-Additional limits, trusted proxy configuration, backup controls and migration gates
-are documented in [.env.example](.env.example) and the
-[security rollout guide](docs/UPGRADING.md#030-deliverysession-hardening-rollout).
-
-
+For other limits and operator procedures, see [.env.example](.env.example) and
+the [upgrade guide](docs/UPGRADING.md).
 Bootstrap credentials can be removed from `.env` after the admin account exists.
 To create an account or reset its password, run the interactive command:
 
@@ -120,10 +117,8 @@ python -m scripts.create_admin --username admin
 For Docker, prefix it with `docker compose exec sideword`.
 Password resets revoke existing admin sessions and reject in-flight logins that
 verified the previous password. Sign in again after a reset.
-Client session issuance rechecks invite and participant validity; renewable
-deadlines are bounded by invite expiry. Follow the
-[recovery procedure](docs/UPGRADING.md#030-deliverysession-hardening-rollout)
-when restoring backups so old credentials do not regain access.
+Follow the [restore procedure](docs/UPGRADING.md#restore-safely) when restoring
+backups so old credentials do not regain access.
 
 ## Public access
 
@@ -143,22 +138,25 @@ shared runner; update `SIDEWORD_PUBLIC_URL` and restart the backend whenever its
 public origin changes. A named tunnel with a personal domain provides a stable
 address. Keep tunnel addresses and credentials out of version control.
 
-The shared runner disables raw access logs because invite paths and legacy
-WebSocket query strings contain credentials. Configure equivalent redaction or
-suppression in reverse proxies, tunnels, and standalone Uvicorn/Docker deployments
-(Uvicorn: `--no-access-log --log-level warning`); never log request bodies, cookies, or authorization
-headers. Limit backup and export retention separately from message TTL.
+Invite paths and session credentials must not enter logs. Apply the
+[public deployment controls](docs/UPGRADING.md#public-deployment-controls) for
+proxy trust, log suppression, resource limits and backup protection.
 
 ## Invites and chats
 
 In **Admin > Invite links > Create link**, choose a personal room with two
-participant slots or a group with an optional limit of 2-1000 participants.
+participant slots or a group with an optional limit. Server capacity limits
+also apply; see [activation rules](docs/API.md#activate-link).
 You can leave the room unprotected, generate a 16-character password, or set a
 custom phrase of 8-32 characters. Custom phrases match exactly, including case
 and whitespace. Share passwords separately from invite links.
 
 Opening an invitation or a link preview does not claim a slot; participants
 must explicitly activate it, including the creator if they want to join.
+Opening a different invite in the test client shows its join form and pauses
+background chat activity in that tab until activation. Successful activation
+selects the invited room. The same invite or `/client` resumes the saved room;
+device keys and encrypted history are preserved without using **Reset device**.
 Full rooms stop accepting new participants, while authenticated reconnects
 reuse existing slots. Revocation, deletion, participant deactivation, and
 expiry invalidate access. Losing browser credentials does not free a slot.
@@ -170,20 +168,12 @@ device** permanently removes them. The latest protected invite is saved encrypte
 in the same tab for up to 24 hours, including across refreshes, but closing the
 tab or clearing browser data can lose it.
 
-The test client calculates full fingerprints locally and pins the first key for
-each peer. Later key changes block encryption and decryption without removing
-history. First-use pinning does not authenticate the initial key or protect
-against malicious JavaScript served by the origin. The v1 protocol has no
-recipient forward secrecy or post-compromise recovery; see the
-[security review and migration plan](docs/SECURITY_REVIEW.md).
-
-Room passwords use salted scrypt verification over HTTPS. The application server
-and TLS terminator see submitted passwords in memory and must be trusted;
-avoid request-body logging. Passwords control admission and do not replace
-message encryption or peer key verification. Failed guesses are limited to five
-per invite per five-minute window, regardless of IP address; authenticated
-reconnects remain available. See the [client API](docs/API.md#activate-link)
-for activation, retry credentials, and the detailed security contract.
+Peer pinning detects later key changes, not initial substitution or malicious
+served code. V1 has no recipient forward secrecy or post-compromise recovery;
+see the [security review](docs/SECURITY_REVIEW.md) for current protections and open work.
+Room passwords control admission, not encryption; the server/TLS terminator sees
+them. See [activation rules](docs/API.md#activate-link) for verification, throttling
+and reconnect credentials.
 
 ## Further documentation
 

@@ -15,6 +15,140 @@ function client(shared = {}) {
   return code => vm.runInContext(code, context);
 }
 
+function inviteClient() {
+  const handlers = new Map();
+  const nodes = new Map();
+  const run = client({ document: {
+    querySelector(selector) {
+      if (!nodes.has(selector)) nodes.set(selector, {
+        value: '', hidden: false, disabled: false,
+        addEventListener(event, handler) { handlers.set(`${selector}:${event}`, handler); },
+        classList: { toggle() {} }, setAttribute() {}, focus() {},
+        querySelector() { return this; },
+      });
+      return nodes.get(selector);
+    },
+    addEventListener() {},
+  } });
+  run(`
+    globalThis.events = [];
+    globalThis.saved = { publicId: 'alice', publicKey: 'device-public-key',
+      privateKey: { device: true }, storageKey: { history: true }, token: 'old-access',
+      activeInviteToken: 'A'.repeat(24), activeInviteChatId: 7 };
+    globalThis.deviceKey = saved.privateKey;
+    globalThis.savedStorageKey = saved.storageKey;
+    window.isSecureContext = true;
+    window.crypto = crypto;
+    window.indexedDB = {};
+    window.location = { protocol: 'https:', host: 'example.test' };
+    window.setInterval = () => 1;
+    globalThis.history = { replaceState() { events.push('url-cleared'); } };
+    globalThis.WebSocket = class {
+      static OPEN = 1;
+      constructor() { this.readyState = 0; events.push('socket'); }
+      addEventListener() {}
+    };
+    readIdentity = async () => saved;
+    writeIdentity = async (value) => { saved = { ...value }; events.push('saved'); };
+    loadStoredHistory = async () => { events.push('history-loaded'); };
+    clearIdentity = async () => { throw new Error('must not erase device'); };
+    readHistoryRecords = async () => { events.push('outbox-read'); return []; };
+    deviceLock = async (_, action) => action();
+    renderOutbox = async () => {};
+    observePeerKey = async peer => peer;
+    selectChat = id => { selectedChatId = id; events.push('selected:' + id); };
+    showToast = () => {};
+    globalThis.failActivation = false;
+    globalThis.nextPublicId = 'alice';
+    api = async path => {
+      events.push(path);
+      if (path.includes('/links/')) {
+        if (failActivation) throw new Error('Invite expired or password incorrect');
+        return { token: 'new-access', user: { public_id: nextPublicId }, chat: { id: 8 },
+          session_id: 'new-session', access_expires_at: '2030-01-01T00:00:00Z',
+          session_expires_at: '2030-01-02T00:00:00Z' };
+      }
+      if (path === '/api/v1/me') return { user: { public_id: nextPublicId,
+        public_key: 'device-public-key' }, chats: [{ id: 7, participants: [] },
+        { id: 8, participants: [] }], send_retry_window_seconds: 3600 };
+      if (path === '/api/v1/poll') return { messages: [], read_receipts: [] };
+      throw new Error('Unexpected request ' + path);
+    };
+    elements.inviteToken.value = 'B'.repeat(24);
+    elements.displayName.value = 'Test participant';
+  `);
+  return { run, submit: () => handlers.get('#activation-form:submit')({ preventDefault() {} }) };
+}
+
+for (const scenario of ['different invite', 'legacy identity', 'fresh device']) {
+  test(`${scenario} opens requested invite without resuming the previous chat`, async () => {
+    const { run } = inviteClient();
+    if (scenario === 'legacy identity') run('delete saved.activeInviteToken;');
+    if (scenario === 'fresh device') run('saved = null;');
+    await run('start();');
+    assert.equal(run('elements.setupPanel.hidden'), false);
+    assert.equal(run('elements.clientPanel.hidden'), true);
+    assert.equal(run('document.querySelector("#reconnect-session").hidden'), true);
+    assert.equal(run('selectedChatId'), null);
+    await run('synchronize(); connectSocket(); scheduleReconnect(); flushOutbox();');
+    assert.deepEqual(Array.from(run('events')), []);
+    if (scenario !== 'fresh device') {
+      assert.equal(run('saved.token'), 'old-access');
+      assert.equal(run('saved.privateKey === deviceKey && saved.storageKey === savedStorageKey'), true);
+    }
+  });
+}
+
+for (const invite of ['', 'A'.repeat(24)]) {
+  test(`${invite ? 'same invite' : 'plain client URL'} resumes its saved room`, async () => {
+    const { run } = inviteClient();
+    run(`elements.inviteToken.value = ${JSON.stringify(invite)};`);
+    await run('start();');
+    assert.equal(run('elements.setupPanel.hidden'), true);
+    assert.equal(run('elements.clientPanel.hidden'), false);
+    assert.equal(run('selectedChatId'), 7);
+    assert.equal(run('events.includes("socket")'), true);
+    assert.equal(run('events.some(value => value.includes("/links/"))'), false);
+  });
+}
+
+for (const changedParticipant of [false, true]) {
+  test(`new invite selects its room and preserves storage${changedParticipant ? ' for a different participant' : ''}`, async () => {
+    const { run, submit } = inviteClient();
+    await run('start();');
+    if (changedParticipant) run("nextPublicId = 'returning-participant';");
+    await submit();
+    assert.equal(run('elements.activationError.hidden'), true);
+    assert.equal(run('elements.setupPanel.hidden'), true);
+    assert.equal(run('elements.clientPanel.hidden'), false);
+    assert.equal(run('selectedChatId'), 8);
+    assert.equal(run('events.includes("selected:7")'), false);
+    assert.equal(run('saved.activeInviteToken'), 'B'.repeat(24));
+    assert.equal(run('saved.activeInviteChatId'), 8);
+    assert.equal(run('saved.privateKey === deviceKey && saved.storageKey === savedStorageKey'), true);
+    assert.equal(run('events.includes("history-loaded")'), true);
+    assert.equal(run('events.includes("url-cleared")'), true);
+    assert.equal(run('events.includes("socket")'), true);
+  });
+}
+
+test('failed invite stays on the form and a retry reuses the saved admission credentials', async () => {
+  const { run, submit } = inviteClient();
+  await run('start();');
+  run('failActivation = true;');
+  await submit();
+  assert.equal(run('elements.activationError.hidden'), false);
+  assert.equal(run('elements.setupPanel.hidden'), false);
+  assert.equal(run('elements.clientPanel.hidden'), true);
+  assert.equal(run('saved.activeInviteToken'), 'A'.repeat(24));
+  const credential = run('saved.activationCredentials["B".repeat(24)]');
+  assert.equal(run('events.includes("url-cleared") || events.includes("socket")'), false);
+  run('failActivation = false;');
+  await submit();
+  assert.equal(run('saved.refreshCredential'), credential);
+  assert.equal(run('selectedChatId'), 8);
+});
+
 for (const failed of [false, true]) {
   test(`send ${failed ? 'failure' : 'success'} updates pending retries after upload and focuses without scrolling`, async () => {
     const handlers = new Map();
